@@ -1,5 +1,7 @@
 ## Malloc
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/pboyd/malloc.svg)](https://pkg.go.dev/github.com/pboyd/malloc)
+
 This is a proof-of-concept memory allocator for Go. A fixed-size chunk of
 memory is held by the arena and handed out as needed, similar to `malloc(3)`.
 
