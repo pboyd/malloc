@@ -15,7 +15,7 @@ defer malloc.Free(pointer)
 // pointer is now a *SomeStruct allocated inside the arena.
 ```
 
-For a more complete example see [example/stack.go](https://github.com/pboyd/malloc/example/stack.go].
+For a more complete example see [example/stack.go](https://github.com/pboyd/malloc/example/stack.go).
 
 It uses a fairly primitive first-fit algorithm to allocate memory. This is
 simple to implement for a proof of concept, but it has some drawbacks:
