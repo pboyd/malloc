@@ -1,6 +1,7 @@
 package malloc
 
 import (
+	"math"
 	"math/rand"
 	"testing"
 	"unsafe"
@@ -165,6 +166,33 @@ func BenchmarkMallocAndFree(b *testing.B) {
 
 	ra.FreeAll()
 	assert.Equal(ra.Arena.FreeBytes(), ra.Arena.Cap())
+}
+
+func TestNewArenaAt(t *testing.T) {
+	assert := assert.New(t)
+
+	buf := make([]byte, 0, 100)
+	arena := NewArenaAt(buf)
+	assert.Equal(6, len(arena.buf), "arena size should round down to an even word size")
+}
+
+func TestArenaSizes(t *testing.T) {
+	assert := assert.New(t)
+
+	// Rounds up to 2 words
+	arena := NewArena(17)
+	assert.NotNil(arena)
+	assert.Equal(2, len(arena.buf))
+
+	// Too small to fit the initial free block headers
+	arena = NewArena(16)
+	assert.Nil(arena)
+
+	// Theoretically this package could support up to 32GiB. Not sure how
+	// well it would work up near the top of that range, but we at least to
+	// prevent uint32 overflows.
+	arena = NewArena(math.MaxUint32 + 1)
+	assert.Nil(arena)
 }
 
 type randomAllocator struct {

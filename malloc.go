@@ -3,6 +3,7 @@ package malloc
 import (
 	"encoding/binary"
 	"errors"
+	"math"
 	"reflect"
 	"unsafe"
 )
@@ -19,13 +20,53 @@ type Arena struct {
 	buf [][2]uint64
 }
 
-// NewArena makes a new arena of the given size.
+// NewArena makes a new arena of the given size. If the size is not evenly
+// divisible by the word size (16 bytes) it will be rounded up.
 //
-// The largest theoretical size of an arena is 32 GiB.
+// Size (after rounding) must be between 32 bytes and 32 GiB. NewArena returns
+// nil if size does not fall in that range.
 func NewArena(size uint64) *Arena {
-	words := uintptrToWords(uintptr(size))
+	if size%wordSize != 0 {
+		size += wordSize - size%wordSize
+	}
+	if size > math.MaxUint32 {
+		return nil
+	}
 
-	a := &Arena{buf: make([][2]uint64, words)}
+	return NewArenaAt(make([]byte, size))
+}
+
+// NewArenaAt creates a new Arena that will allocate memory inside the given
+// buffer. Some space will be wasted if the capacity of the buffer is not
+// evenly divisible by the word size (16 bytes).
+//
+// The type of the slice is irrelevant for NewArenaAt because it merely uses it
+// as a fixed-size buffer. For convience NewArenaAt will accept a slice of any
+// type, however the data stored in the buffer will have no relation to the
+// type.
+//
+// The caller should not modify buf directly after passing it to NewArenaAt.
+func NewArenaAt[T any](buf []T) *Arena {
+	addr := unsafe.SliceData(buf)
+	if addr == nil {
+		return nil
+	}
+
+	words := uintptr(cap(buf)) * unsafe.Sizeof(*addr) / wordSize
+	if words < 2 {
+		// Not enough space for even the initial free blocks.
+		return nil
+	}
+
+	// 32 GiB is the largest theoretical size supported. Cap the buffer to
+	// that if necessary.
+	if words > math.MaxUint32/wordSize {
+		words = math.MaxUint32/wordSize - 1
+	}
+
+	a := &Arena{
+		buf: unsafe.Slice((*[2]uint64)(unsafe.Pointer(addr)), words),
+	}
 
 	// Layout the initial memory:
 	// - The first free block has no space, it exists to point to the first
@@ -33,7 +74,7 @@ func NewArena(size uint64) *Arena {
 	// - The second block has all the space which isn't in the first block.
 
 	second := a.index(1)
-	second.size = words - 1
+	second.size = uint32(words) - 1
 
 	first := a.index(0)
 	first.next = second
