@@ -3,6 +3,7 @@ package malloc
 import (
 	"encoding/binary"
 	"errors"
+	"log"
 	"math"
 	"reflect"
 	"unsafe"
@@ -153,11 +154,13 @@ func (a *Arena) Malloc(size uintptr) (unsafe.Pointer, error) {
 }
 
 // Free deallocates a specific number of bytes of memory starting at the
-// pointer.
+// pointer. The memory range should not be used after calling Free.
 //
-// If the pointer is not inside the arena Free will panic.
+// It's expected that most callers will free entire blocks obtained from
+// Malloc, however nothing prevents free part of a block.
 //
-// The slice should not be used after calling Free.
+// If the pointer is not inside the arena Free will panic. Free will also panic
+// if it detects an attempt to free already freed memory.
 func (a *Arena) Free(x unsafe.Pointer, size uintptr) {
 	// This is the "Liberation" algorithm from Knuth 1.2.5 that goes along with
 	// the first-fit algorithm above.
@@ -194,14 +197,52 @@ func (a *Arena) Free(x unsafe.Pointer, size uintptr) {
 	// in the last block), so p should be inserted in the list between
 	// those two entries.
 
-	if after != nil && addrOf(p)+uintptr(words)*wordSize == addrOf(after) {
+	if after == p {
+		// Instead of finding the block header for the previous block
+		// we found the address we're trying to free. Panic because the
+		// alternative would set p.next to p and cause a hang the next
+		// time we walk the list.
+		panic("double-free detected: attempted to free already free block")
+	}
+
+	beforeEnd := addrOf(before) + uintptr(before.size)*wordSize
+	if beforeEnd > addrOf(p) {
+		// The end of the block that supposedly precedes this one
+		// overlaps with the space we're trying to free.
+		panic("double-free detected: attempted to free inside of an already free block")
+	}
+
+	pEnd := addrOf(p) + uintptr(words)*wordSize
+	if after != nil && pEnd > addrOf(after) {
+		// The end of the block to free overlaps the next block. If our
+		// callers were well behaved this shouldn't happen, but a
+		// possible cause is:
+		//
+		// - func1 allocates memory and frees it
+		// - func2 allocates a larger block of memory that includes the range previously allocated to func1
+		// - func1 mistakenly frees its memory again
+		// - func2 frees its memory
+		//
+		// We could panic here, but the corruption has already
+		// occurred, so it seems better to consume the overlapping
+		// blocks.
+
+		log.Printf("malloc.Free: possible double-free detected: block to free overlaps another free block")
+
+		for after != nil && pEnd > addrOf(after) {
+			after = after.next
+		}
+	}
+
+	if after != nil && pEnd == addrOf(after) {
 		// Nothing was allocated between p and after, so merge the two free blocks together.
 		words += after.size
 		p.next = after.next
 	} else {
 		p.next = after
 	}
-	if addrOf(before)+uintptr(before.size)*wordSize == addrOf(p) {
+
+	if beforeEnd == addrOf(p) {
 		// Nothing was allocated between before and p, so merge the two free blocks together.
 		before.size += words
 		before.next = p.next

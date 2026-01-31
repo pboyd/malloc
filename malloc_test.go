@@ -1,6 +1,7 @@
 package malloc
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"testing"
@@ -276,6 +277,91 @@ func TestBackwardMerge(t *testing.T) {
 	p, err := a.Malloc(48)
 	assert.NoError(err)
 	assert.Equal(0, a.FreeBytes())
+}
+
+func TestDoubleFree(t *testing.T) {
+	t.Run("should panic when freeing the start of a free block", func(t *testing.T) {
+		a := NewArena(32)
+		p, _ := a.Malloc(16)
+
+		// First free
+		a.Free(p, 16)
+
+		// Second free should panic
+		err := func() (err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("caught panic: %v", r)
+				}
+			}()
+			a.Free(p, 16)
+			return
+		}()
+
+		assert.ErrorContains(t, err, "double-free")
+	})
+
+	t.Run("should panic when freeing inside a free block", func(t *testing.T) {
+		a := NewArena(48)
+		p2, _ := a.Malloc(16)
+		p1, _ := a.Malloc(16)
+
+		// Word 0: header, Word 1: p1, Word 2: p2
+
+		a.Free(p1, 16)
+		a.Free(p2, 16)
+
+		// Now everything is unallocated, but we still have a pointer
+		// inside the free block
+		// Word 0: header, Words 1-2: free (but p1 and p2 still point here)
+
+		// Freeing p2 again should panic
+		err := func() (err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("caught panic: %v", r)
+				}
+			}()
+			a.Free(p2, 16)
+			return
+		}()
+
+		assert.ErrorContains(t, err, "double-free")
+		assert.Equal(t, 32, a.FreeBytes())
+	})
+
+	t.Run("double-free inside another allocated block", func(t *testing.T) {
+		// This serves to document the sort of double-free bugs that aren't detected.
+
+		a := NewArena(64)
+		p3, _ := a.Malloc(16)
+		p2, _ := a.Malloc(16)
+		p1, _ := a.Malloc(16)
+
+		// Word 0: header, Word 1: p1, Word 2: p2, Word 3: p3
+
+		a.Free(p1, 16)
+		a.Free(p2, 16)
+		a.Free(p3, 16)
+
+		// Everything is unallocated, but the pointers still exist.
+		// Get a new block that takes everything.
+		p, _ := a.Malloc(48)
+
+		// Free p2 again, which is right in the middle of the other allocation.
+		a.Free(p2, 16)
+
+		// Now we have a real mess. According to the arena:
+		//     Word 0: header, Word 1: reserved, Word 2: free, Word 3: reserved
+		//
+		// The owner of p believes it has all 48 bytes, but it's
+		// corrupted with our block header in the middle.
+		//
+		// If for some reason the program doesn't crash after this,
+		// freeing the larger block should get back to a good state.
+		a.Free(p, 48)
+		assert.Equal(t, 48, a.FreeBytes())
+	})
 }
 
 type randomAllocator struct {
