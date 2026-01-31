@@ -123,6 +123,10 @@ func (a *Arena) FreeBytes() int {
 func (a *Arena) Malloc(size uintptr) (unsafe.Pointer, error) {
 	// This algorithm is based on the First-fit allocator in Knuth AOCP 1.2.5.
 
+	if size == 0 {
+		return nil, nil
+	}
+
 	words := uintptrToWords(size)
 
 	// Search through the list of free blocks looking for one big enough to hold

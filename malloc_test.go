@@ -127,6 +127,18 @@ func TestMallocFunction(t *testing.T) {
 	assert.Equal(4, (*double)(2))
 }
 
+func TestMallocZero(t *testing.T) {
+	assert := assert.New(t)
+
+	a := NewArena(64)
+	p, err := a.Malloc(0)
+	assert.Nil(p)
+	assert.NoError(err)
+
+	// Verify the arena is unaffected
+	assert.Equal(48, a.FreeBytes())
+}
+
 func TestMallocSlice(t *testing.T) {
 	assert := assert.New(t)
 
