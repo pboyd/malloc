@@ -179,7 +179,7 @@ func (a *Arena) Free(x unsafe.Pointer, size uintptr) {
 	words := uintptrToWords(size)
 
 	p := (*blockHeader)(x)
-	if !a.Contains(p) {
+	if !contains(p, a.buf) {
 		panic("attempted to free a pointer that is not in arena")
 	}
 
@@ -273,7 +273,7 @@ func (a *Arena) Raw() []byte {
 //
 // Panics if p is not a pointer.
 func (a *Arena) Contains(p any) bool {
-	addr := addrOf(p)
+	addr := uintptr(reflect.ValueOf(p).UnsafePointer())
 	return addr >= uintptr(unsafe.Pointer(&a.buf[0])) && addr <= uintptr(unsafe.Pointer(&a.buf[len(a.buf)-1]))
 }
 
@@ -400,6 +400,13 @@ func (b *blockHeader) Pointer(n uint32) unsafe.Pointer {
 	return unsafe.Pointer(uintptr(unsafe.Pointer(b)) + uintptr(n*wordSize))
 }
 
-func addrOf(p any) uintptr {
-	return uintptr(reflect.ValueOf(p).UnsafePointer())
+// contains returns true if the pointer is contained inside the provided
+// buffer.
+func contains[T any](ptr *T, buf [][2]uint64) bool {
+	addr := addrOf(ptr)
+	return addr >= uintptr(unsafe.Pointer(&buf[0])) && addr <= uintptr(unsafe.Pointer(&buf[len(buf)-1]))
+}
+
+func addrOf[T any](p *T) uintptr {
+	return uintptr(unsafe.Pointer(p))
 }
