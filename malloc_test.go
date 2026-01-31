@@ -190,6 +190,53 @@ func TestMallocSlice(t *testing.T) {
 	assert.Equal(initialFree, a.FreeBytes())
 }
 
+func TestMallocSliceIsZerod(t *testing.T) {
+	assert := assert.New(t)
+
+	a := NewArena(64)
+	buf, err := MallocSlice[byte](a, 48)
+	if !assert.NoError(err) {
+		return
+	}
+
+	for i := range buf {
+		buf[i] = 0xff
+	}
+	FreeSlice(a, buf)
+
+	newBuf, err := MallocSlice[byte](a, 48)
+	if !assert.NoError(err) {
+		return
+	}
+
+	sum := 0
+	for _, c := range newBuf {
+		sum += int(c)
+	}
+	assert.Equal(0, sum)
+}
+
+func TestMallocObjectIsZerod(t *testing.T) {
+	assert := assert.New(t)
+
+	a := NewArena(64)
+	buf, err := MallocSlice[byte](a, 48)
+	if !assert.NoError(err) {
+		return
+	}
+
+	for i := range buf {
+		buf[i] = 0xff
+	}
+	FreeSlice(a, buf)
+
+	ptr, err := Malloc[uint](a)
+	if assert.NoError(err) {
+		assert.Equal(uint(0), *ptr)
+	}
+
+}
+
 func TestRandomMallocs(t *testing.T) {
 	assert := assert.New(t)
 

@@ -285,10 +285,15 @@ func (a *Arena) index(n uint32) *blockHeader {
 
 // Malloc allocates a pointer of an arbitrary type in the arena.
 func Malloc[T any](a *Arena) (*T, error) {
-	p, err := a.Malloc(sizeof[T]())
+	size := sizeof[T]()
+	p, err := a.Malloc(size)
 	if err != nil {
 		return nil, err
 	}
+
+	// Clear the memory before returning it.
+	clear(unsafe.Slice((*byte)(unsafe.Pointer(p)), size))
+
 	return (*T)(p), nil
 }
 
@@ -344,6 +349,7 @@ func MallocSlice[T any, N constraints.Integer](a *Arena, length N, capacity ...N
 	}
 
 	s := unsafe.Slice((*T)(unsafe.Pointer(addr)), c)
+	clear(s)
 	return s[:length], nil
 }
 
