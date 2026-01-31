@@ -246,6 +246,38 @@ func TestArenaSizes(t *testing.T) {
 	assert.Nil(arena)
 }
 
+func TestBackwardMerge(t *testing.T) {
+	assert := assert.New(t)
+
+	// Create arena with exactly 4 words (64 bytes)
+	// Word 0: header, Words 1-3: free
+	a := NewArena(64)
+
+	// Sanity check: 48 free bytes which can be allocated in one chunk
+	assert.Equal(48, a.FreeBytes())
+	p, _ := a.Malloc(48)
+	assert.Equal(0, a.FreeBytes())
+	a.Free(p, 48)
+
+	// Allocate 16 bytes. It should be allocated as the very last word
+	// Word 0: header, Words 1-2: free, Word 3: this pointer
+	p, _ = a.Malloc(16)
+	assert.Equal(32, a.FreeBytes())
+
+	// Now free the buffer and it should merge with the block before it and
+	// be exactly the same as the initial arena
+	// Word 0: header, Words 1-3: free
+	a.Free(p, 16)
+	assert.Equal(48, a.FreeBytes())
+
+	// However there was a bug where backward merges didn't work:
+	// Word 0: header, Words 1-2: free block, Word 3: separate free block
+	// So this call would fail because of fragmentation even though all the space was available.
+	p, err := a.Malloc(48)
+	assert.NoError(err)
+	assert.Equal(0, a.FreeBytes())
+}
+
 type randomAllocator struct {
 	rnd     *rand.Rand
 	records []allocRecord

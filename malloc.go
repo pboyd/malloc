@@ -194,14 +194,14 @@ func (a *Arena) Free(x unsafe.Pointer, size uintptr) {
 	// in the last block), so p should be inserted in the list between
 	// those two entries.
 
-	if after != nil && addrOf(p)+uintptr(words*wordSize) == addrOf(after) {
+	if after != nil && addrOf(p)+uintptr(words)*wordSize == addrOf(after) {
 		// Nothing was allocated between p and after, so merge the two free blocks together.
 		words += after.size
 		p.next = after.next
 	} else {
 		p.next = after
 	}
-	if addrOf(before)+uintptr(before.size) == addrOf(p) {
+	if addrOf(before)+uintptr(before.size)*wordSize == addrOf(p) {
 		// Nothing was allocated between before and p, so merge the two free blocks together.
 		before.size += words
 		before.next = p.next
