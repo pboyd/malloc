@@ -333,7 +333,7 @@ func TestBackwardMerge(t *testing.T) {
 	// However there was a bug where backward merges didn't work:
 	// Word 0: header, Words 1-2: free block, Word 3: separate free block
 	// So this call would fail because of fragmentation even though all the space was available.
-	p, err := a.Malloc(48)
+	_, err := a.Malloc(48)
 	assert.NoError(err)
 	assert.Equal(0, a.FreeBytes())
 }

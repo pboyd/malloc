@@ -256,7 +256,7 @@ func (a *Arena) Free(x unsafe.Pointer, size uintptr) {
 	}
 }
 
-// Raw makes a copy of the memory for for debugging.
+// Raw makes a copy of the memory for debugging.
 func (a *Arena) Raw() []byte {
 	buf := make([]byte, len(a.buf)*wordSize)
 	for i, v := range a.buf {
