@@ -28,8 +28,11 @@ type Arena struct {
 // NewArena makes a new arena of the given size. If the size is not evenly
 // divisible by the word size (16 bytes) it will be rounded up.
 //
-// Size (after rounding) must be between 32 bytes and 32 GiB. NewArena returns
-// nil if size does not fall in that range.
+// Size (after rounding) must be between 32 bytes and 64 GiB (theoretically).
+// NewArena returns nil if size does not fall in that range.
+//
+// The arena requires 16 bytes for the initial block header, so the maximum
+// allocatable size in the arena will be size - 16 bytes.
 func NewArena(size uint64) *Arena {
 	if size%wordSize != 0 {
 		size += wordSize - size%wordSize
@@ -63,7 +66,7 @@ func NewArenaAt[T any](buf []T) *Arena {
 		return nil
 	}
 
-	// 32 GiB is the largest theoretical size supported. Cap the buffer to
+	// 64 GiB is the largest theoretical size supported. Cap the buffer to
 	// that if necessary.
 	if words > math.MaxUint32/wordSize {
 		words = math.MaxUint32/wordSize - 1
