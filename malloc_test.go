@@ -239,7 +239,7 @@ func TestArenaSizes(t *testing.T) {
 	arena = NewArena(16)
 	assert.Nil(arena)
 
-	// Theoretically this package could support up to 32GiB. Not sure how
+	// Theoretically this package could support up to 32 GiB. Not sure how
 	// well it would work up near the top of that range, but we at least to
 	// prevent uint32 overflows.
 	arena = NewArena(math.MaxUint32 + 1)

@@ -18,6 +18,9 @@ const wordSize = 16
 var ErrOutOfMemory = errors.New("out of memory")
 
 // Arena holds a fixed amount of memory which can be allocated.
+//
+// Arena is not safe for concurrent use. Use a mutex if it will be used in
+// multiple goroutines.
 type Arena struct {
 	buf [][2]uint64
 }
@@ -43,8 +46,8 @@ func NewArena(size uint64) *Arena {
 // evenly divisible by the word size (16 bytes).
 //
 // The type of the slice is irrelevant for NewArenaAt because it merely uses it
-// as a fixed-size buffer. For convience NewArenaAt will accept a slice of any
-// type, however the data stored in the buffer will have no relation to the
+// as a fixed-size buffer. For convenience NewArenaAt will accept a slice of
+// any type, however the data stored in the buffer will have no relation to the
 // type.
 //
 // The caller should not modify buf directly after passing it to NewArenaAt.
@@ -108,7 +111,8 @@ func (a *Arena) FreeBytes() int {
 }
 
 // Malloc allocates a new pointer in the arena of at least the given size. Size
-// is in bytes.
+// is in bytes. Unlike the typical behavior in Go, the data returned by Malloc
+// is not zeroed.
 //
 // Memory is managed in 16-byte words. If size is not evenly divisible by 16
 // it will be rounded up.
@@ -149,6 +153,8 @@ func (a *Arena) Malloc(size uintptr) (unsafe.Pointer, error) {
 // pointer.
 //
 // If the pointer is not inside the arena Free will panic.
+//
+// The slice should not be used after calling Free.
 func (a *Arena) Free(x unsafe.Pointer, size uintptr) {
 	// This is the "Liberation" algorithm from Knuth 1.2.5 that goes along with
 	// the first-fit algorithm above.
@@ -296,12 +302,16 @@ func MallocSlice[T any, N constraints.Integer](a *Arena, length N, capacity ...N
 // allocated in the arena.
 //
 // Free will panic if the pointer was not allocated within the arena.
+//
+// The object should not be used after calling Free.
 func Free[T any](a *Arena, p *T) {
 	a.Free(unsafe.Pointer(p), sizeof[T]())
 }
 
 // FreeSlice deallocates the data in a slice allocated with MallocSlice. This
 // will panic if the slice data is not in the arena.
+//
+// The slice should not be used after calling Free.
 func FreeSlice[T any](a *Arena, s []T) {
 	if s == nil || cap(s) == 0 {
 		return

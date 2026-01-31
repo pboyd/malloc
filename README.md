@@ -10,7 +10,7 @@ Basic usage:
 ```go
 arena := malloc.NewArena(1024)
 pointer := malloc.Malloc[SomeStruct](a)
-defer malloc.Free(pointer)
+defer malloc.Free(arena, pointer)
 
 // pointer is now a *SomeStruct allocated inside the arena.
 ```
