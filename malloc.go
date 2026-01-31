@@ -6,6 +6,8 @@ import (
 	"math"
 	"reflect"
 	"unsafe"
+
+	"golang.org/x/exp/constraints"
 )
 
 // Number of bytes in each word.
@@ -143,7 +145,8 @@ func (a *Arena) Malloc(size uintptr) (unsafe.Pointer, error) {
 	return p.Pointer(k), nil
 }
 
-// Free deallocates size bytes of memory starting a the pointer.
+// Free deallocates a specific number of bytes of memory starting at the
+// pointer.
 //
 // If the pointer is not inside the arena Free will panic.
 func (a *Arena) Free(x unsafe.Pointer, size uintptr) {
@@ -219,20 +222,74 @@ func (a *Arena) Contains(p any) bool {
 	return addr >= uintptr(unsafe.Pointer(&a.buf[0])) && addr <= uintptr(unsafe.Pointer(&a.buf[len(a.buf)-1]))
 }
 
-// index returns the nth blockHeader, if the entire memory were an array of
-// blockHeaders. This is generally unsafe, except that index 0 is always the
-// list head. And in an empty arena index 1 has all the space.
+// index assumes that the entire buffer is filled with blockHeaders and returns
+// the nth one. This is generally unsafe, except for index 0 and 1.
 func (a *Arena) index(n uint32) *blockHeader {
 	return (*blockHeader)(unsafe.Pointer(&a.buf[n]))
 }
 
 // Malloc allocates a pointer of an arbitrary type in the arena.
 func Malloc[T any](a *Arena) (*T, error) {
-	p, err := a.Malloc(unsafe.Sizeof((*(*T)(nil))))
+	p, err := a.Malloc(sizeof[T]())
 	if err != nil {
 		return nil, err
 	}
 	return (*T)(p), nil
+}
+
+// MallocSlice returns a new slice of the requested type, length and capacity.
+// The slice's data will reside in the arena, but the slice header is a
+// standard heap-allocated Go slice.
+//
+//	// Get a []int, len=10, cap=10:
+//	intSlice, err := MallocSlice[int](a, 10)
+//
+//	// Get a []uint8, len=1, cap=100:
+//	uint8Slice, err := MallocSlice[uint8](a, 1, 100)
+//
+// The builtin append function can be used with the slice, however if slice is
+// grown beyond the allocated array it will convert to a standard Go slice and
+// the memory will not be freed from the arena.
+//
+// MallocSlice is variadic so that capacity can be optional. If not specified,
+// capacity will be equal to length. It will panic if more than one value is
+// given for capacity.
+//
+// It will also panic if length or capacity is less than 0, or if length is
+// greater than capacity.
+func MallocSlice[T any, N constraints.Integer](a *Arena, length N, capacity ...N) ([]T, error) {
+	if length < 0 {
+		panic("malloc.MallocSlice: invalid argument: length < 0")
+	}
+
+	var c uintptr
+	switch len(capacity) {
+	case 0:
+		c = uintptr(length)
+	case 1:
+		if capacity[0] < 0 {
+			panic("malloc.MallocSlice: invalid argument: capacity < 0")
+		}
+		c = uintptr(capacity[0])
+	default:
+		panic("malloc.MallocSlice: multiple values provided for capacity")
+	}
+
+	if uintptr(length) > c {
+		panic("malloc.MallocSlice: invalid arguments: length > capacity")
+	}
+
+	if c == 0 {
+		return []T{}, nil
+	}
+
+	addr, err := a.Malloc(sizeof[T]() * uintptr(c))
+	if err != nil {
+		return nil, err
+	}
+
+	s := unsafe.Slice((*T)(unsafe.Pointer(addr)), c)
+	return s[:length], nil
 }
 
 // Free deallocates the memory associated with a pointer that was previously
@@ -240,7 +297,21 @@ func Malloc[T any](a *Arena) (*T, error) {
 //
 // Free will panic if the pointer was not allocated within the arena.
 func Free[T any](a *Arena, p *T) {
-	a.Free(unsafe.Pointer(p), unsafe.Sizeof((*(*T)(nil))))
+	a.Free(unsafe.Pointer(p), sizeof[T]())
+}
+
+// FreeSlice deallocates the data in a slice allocated with MallocSlice. This
+// will panic if the slice data is not in the arena.
+func FreeSlice[T any](a *Arena, s []T) {
+	if s == nil || cap(s) == 0 {
+		return
+	}
+
+	a.Free(unsafe.Pointer(unsafe.SliceData(s)), sizeof[T]()*uintptr(cap(s)))
+}
+
+func sizeof[T any]() uintptr {
+	return unsafe.Sizeof((*(*T)(nil)))
 }
 
 func uintptrToWords(s uintptr) uint32 {

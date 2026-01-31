@@ -126,6 +126,57 @@ func TestMallocFunction(t *testing.T) {
 	assert.Equal(4, (*double)(2))
 }
 
+func TestMallocSlice(t *testing.T) {
+	assert := assert.New(t)
+
+	a := NewArena(128)
+	initialFree := a.FreeBytes()
+
+	// len=0, cap=100
+	buf, err := MallocSlice[byte](a, 0, 100)
+	if !assert.NoError(err) {
+		return
+	}
+	assert.Equal(0, len(buf))
+	assert.Equal(100, cap(buf))
+	FreeSlice(a, buf)
+
+	// len=100, cap=len
+	buf, err = MallocSlice[byte](a, 100)
+	if !assert.NoError(err) {
+		return
+	}
+	assert.Equal(100, len(buf))
+	assert.Equal(100, cap(buf))
+
+	_, err = MallocSlice[int64](a, 0, 10)
+	assert.ErrorIs(err, ErrOutOfMemory)
+
+	FreeSlice(a, buf)
+
+	intSlice, err := MallocSlice[int64](a, 5, 10)
+	if !assert.NoError(err) {
+		return
+	}
+	assert.Equal(10, cap(intSlice))
+
+	// Slice data should be in the arena after appending up to capacity
+	intSlice = append(intSlice, 6, 7, 8, 9, 10)
+	assert.Equal([]int64{0, 0, 0, 0, 0, 6, 7, 8, 9, 10}, intSlice)
+	assert.True(a.Contains(unsafe.SliceData(intSlice)))
+
+	// Slice data is moved from the arena if the slice grows beyond capacity
+	newIntSlice := append(intSlice, 11)
+	assert.False(a.Contains(unsafe.SliceData(newIntSlice)))
+
+	// But it's possible to still use and free the original slice
+	assert.True(a.Contains(unsafe.SliceData(intSlice)))
+	assert.Equal(10, len(intSlice))
+	assert.Equal(10, cap(intSlice))
+	FreeSlice(a, intSlice)
+	assert.Equal(initialFree, a.FreeBytes())
+}
+
 func TestRandomMallocs(t *testing.T) {
 	assert := assert.New(t)
 
