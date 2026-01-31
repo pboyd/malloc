@@ -171,42 +171,43 @@ func (a *Arena) Free(x unsafe.Pointer, size uintptr) {
 
 	words := uintptrToWords(size)
 
-	p0 := (*blockHeader)(x)
-	if !a.Contains(p0) {
+	p := (*blockHeader)(x)
+	if !a.Contains(p) {
 		panic("attempted to free a pointer that is not in arena")
 	}
 
-	// Search through the free list to find the entry immediately before the area
-	// to be freed, or the end of the list, whichever comes first.
+	// Search through the free list to find the entries immediately before
+	// and after the area to be freed, or the end of the list, whichever
+	// comes first.
 	//
 	// This assumes that later entries in the free list have greater memory
 	// addresses.
 
-	q := a.index(0)
-	p := q.next
-	for p != nil && addrOf(p) < addrOf(p0) {
-		q = p
-		p = q.next
+	before := a.index(0)
+	after := before.next
+	for after != nil && addrOf(after) < addrOf(p) {
+		before = after
+		after = before.next
 	}
 
-	// Now q is the entry before p0 and p is entry after it (which will be nil,
-	// if p0 is in the last block), so p0 should be inserted in the list between
+	// Now p is between "before" and "after" (which will be nil, if p is
+	// in the last block), so p should be inserted in the list between
 	// those two entries.
 
-	if p != nil && addrOf(p0)+uintptr(words*wordSize) == addrOf(p) {
-		// Nothing was allocated between p0 and p, so merge the two free blocks together.
-		words += p.size
-		p0.next = p.next
+	if after != nil && addrOf(p)+uintptr(words*wordSize) == addrOf(after) {
+		// Nothing was allocated between p and after, so merge the two free blocks together.
+		words += after.size
+		p.next = after.next
 	} else {
-		p0.next = p
+		p.next = after
 	}
-	if addrOf(q)+uintptr(q.size) == addrOf(p0) {
-		// Nothing was allocated between q an p0, so merge the two free blocks together.
-		q.size += words
-		q.next = p0.next
+	if addrOf(before)+uintptr(before.size) == addrOf(p) {
+		// Nothing was allocated between before and p, so merge the two free blocks together.
+		before.size += words
+		before.next = p.next
 	} else {
-		q.next = p0
-		p0.size = words
+		before.next = p
+		p.size = words
 	}
 }
 
