@@ -31,7 +31,7 @@ func TestMallocAll(t *testing.T) {
 	// Verify that no more memory can be allocated.
 	overflow, err := Malloc[byte](a)
 	assert.Nil(overflow)
-	assert.Error(err, ErrOutOfMemory)
+	assert.ErrorIs(err, ErrOutOfMemory)
 
 	Free(a, p)
 	assert.Equal(a.FreeBytes(), a.Cap())
@@ -58,7 +58,7 @@ func TestMallocSmallItems(t *testing.T) {
 
 		overflow, err := Malloc[byte](a)
 		assert.Nil(overflow)
-		assert.Error(err, ErrOutOfMemory)
+		assert.ErrorIs(err, ErrOutOfMemory)
 
 		return pointers
 	}

@@ -305,6 +305,10 @@ func MallocSlice[T any, N constraints.Integer](a *Arena, length N, capacity ...N
 //
 // The object should not be used after calling Free.
 func Free[T any](a *Arena, p *T) {
+	if p == nil {
+		return
+	}
+
 	a.Free(unsafe.Pointer(p), sizeof[T]())
 }
 
