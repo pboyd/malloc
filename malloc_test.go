@@ -190,7 +190,49 @@ func TestMallocSlice(t *testing.T) {
 	assert.Equal(initialFree, a.FreeBytes())
 }
 
-func TestMallocSliceIsZerod(t *testing.T) {
+func TestShrinkSlice(t *testing.T) {
+	assert := assert.New(t)
+
+	a := NewArena(128)
+	intSlice, _ := MallocSlice[int64](a, 3, 10)
+	initialFree := a.FreeBytes()
+
+	newIntSlice := ShrinkSlice(a, intSlice)
+
+	assert.Same(unsafe.SliceData(intSlice), unsafe.SliceData(newIntSlice))
+	assert.Equal(len(intSlice), len(newIntSlice))
+	assert.Equal(len(newIntSlice), cap(newIntSlice))
+	assert.Greater(a.FreeBytes(), initialFree)
+
+	newIntSlice = newIntSlice[:0]
+	assert.Equal(0, cap(ShrinkSlice(a, newIntSlice)))
+	assert.Equal(128-wordSize, a.FreeBytes())
+
+	byteSlice, _ := MallocSlice[byte](a, 95, 96)
+	initialFree = a.FreeBytes()
+
+	// This doesn't really free anything, but it adjusts cap
+	byteSlice = ShrinkSlice(a, byteSlice)
+	assert.Equal(95, len(byteSlice))
+	assert.Equal(95, cap(byteSlice))
+	assert.Equal(initialFree, a.FreeBytes())
+
+	// This frees one word:
+	byteSlice = byteSlice[:80]
+	byteSlice = ShrinkSlice(a, byteSlice)
+	assert.Equal(80, len(byteSlice))
+	assert.Equal(80, cap(byteSlice))
+	assert.Equal(initialFree+16, a.FreeBytes())
+
+	// Free all but one word:
+	byteSlice = byteSlice[:1]
+	byteSlice = ShrinkSlice(a, byteSlice)
+	assert.Equal(1, len(byteSlice))
+	assert.Equal(1, cap(byteSlice))
+	assert.Equal(128-wordSize*2, a.FreeBytes())
+}
+
+func TestMallocSliceIsCleared(t *testing.T) {
 	assert := assert.New(t)
 
 	a := NewArena(64)
@@ -216,7 +258,7 @@ func TestMallocSliceIsZerod(t *testing.T) {
 	assert.Equal(0, sum)
 }
 
-func TestMallocObjectIsZerod(t *testing.T) {
+func TestMallocObjectIsCleared(t *testing.T) {
 	assert := assert.New(t)
 
 	a := NewArena(64)

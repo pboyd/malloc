@@ -387,6 +387,43 @@ func FreeSlice[T any](a *Arena, s []T) {
 	a.Free(unsafe.Pointer(unsafe.SliceData(s)), sizeof[T]()*uintptr(cap(s)))
 }
 
+// ShrinkSlice frees any unused capacity in a slice. The returned slice will
+// use the same underlying data as the original slice, but with a capacity
+// equal to the length of the original slice.
+//
+// If the slice has a length of zero the entire slice is freed and an empty
+// slice with no capacity is returned.
+//
+// Appending to the original slice after calling ShrinkSlice will corrupt the
+// arena. Callers should take care to use the returned slice in place of the
+// original one.
+//
+// This will panic if the slice data was not allocated in the arena.
+func ShrinkSlice[T any](a *Arena, s []T) []T {
+	if s == nil {
+		return nil
+	}
+
+	elemSize := sizeof[T]()
+	dataAddr := uintptr(unsafe.Pointer(unsafe.SliceData(s)))
+
+	// Find the address of the word starting immediately after the end of
+	// the data
+	p := dataAddr + elemSize*(uintptr(len(s)))
+	p = (p + wordSize - 1) &^ (wordSize - 1)
+
+	// Find the end of the slice. Round it up to the next word like Malloc
+	// did originally.
+	sliceEnd := dataAddr + elemSize*uintptr(cap(s))
+	sliceEnd = (sliceEnd + wordSize - 1) &^ (wordSize - 1)
+
+	if sliceEnd-p >= wordSize {
+		a.Free(unsafe.Pointer(p), sliceEnd-p)
+	}
+
+	return unsafe.Slice((*T)(unsafe.Pointer(dataAddr)), len(s))
+}
+
 func sizeof[T any]() uintptr {
 	return unsafe.Sizeof((*(*T)(nil)))
 }
