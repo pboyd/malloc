@@ -3,6 +3,7 @@ package malloc
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"log"
 	"math"
 	"reflect"
@@ -161,7 +162,9 @@ func (a *Arena) Malloc(size uintptr) (unsafe.Pointer, error) {
 // pointer. The memory range should not be used after calling Free.
 //
 // It's expected that most callers will free entire blocks obtained from
-// Malloc, however nothing prevents free part of a block.
+// Malloc, and therefore size will be rounded up to the nearest word size to
+// match the behavior of Malloc. However nothing prevents freeing part of a
+// block as long as the address and size are aligned to 16-bit word boundaries.
 //
 // If the pointer is not inside the arena Free will panic. Free will also panic
 // if it detects an attempt to free already freed memory.
@@ -174,6 +177,11 @@ func (a *Arena) Free(x unsafe.Pointer, size uintptr) {
 	// to another free block they'll be merged together.
 	if x == nil {
 		return
+	}
+
+	// Verify that the address is on a word boundary.
+	if uintptr(x) != uintptr(x)&^(uintptr(wordSize)-1) {
+		panic(fmt.Sprintf("attempted to free non-word aligned pointer: %v", x))
 	}
 
 	words := uintptrToWords(size)
@@ -383,12 +391,11 @@ func sizeof[T any]() uintptr {
 	return unsafe.Sizeof((*(*T)(nil)))
 }
 
+// Finds the minimum number of words required to hold a value of the given
+// number of bytes.
 func uintptrToWords(s uintptr) uint32 {
-	if s%wordSize == 0 {
-		return uint32(s / wordSize)
-	}
-
-	return uint32(s/wordSize + 1)
+	// Assumes wordSize is 16
+	return uint32(((s + 0xf) &^ 0xf) >> 4)
 }
 
 // blockHeader marks the beginning of each free block.
