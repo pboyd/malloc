@@ -132,7 +132,7 @@ func TestMallocZero(t *testing.T) {
 
 	a := NewArena(64)
 	p, err := a.Malloc(0)
-	assert.Nil(p)
+	assert.True(p == nil)
 	assert.NoError(err)
 
 	// Verify the arena is unaffected
