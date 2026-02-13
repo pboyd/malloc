@@ -2,29 +2,26 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/pboyd/malloc.svg)](https://pkg.go.dev/github.com/pboyd/malloc)
 
-This is a proof-of-concept memory allocator for Go. A fixed-size chunk of
-memory is held by the arena and handed out as needed, similar to `malloc(3)`.
+This is a memory allocator for Go. The arena holds a chunk of memory and hands it out as needed, similar to `malloc(3)`.
 
 Basic usage:
 
 ```go
 arena := malloc.NewArena(1024)
-pointer := malloc.Malloc[SomeStruct](a)
+pointer := malloc.Malloc[SomeStruct](arena)
 defer malloc.Free(arena, pointer)
 
-// pointer is now a *SomeStruct allocated inside the arena.
+// pointer now points to a SomeStruct in the arena.
 ```
 
 For a more complete example see [example/stack.go](https://github.com/pboyd/malloc/blob/master/example/stack.go).
 
-It uses a fairly primitive first-fit algorithm to allocate memory. This is
-simple to implement for a proof of concept, but it has some drawbacks:
+This package uses a simple first-fit algorithm to allocate memory. The algorithm has some drawbacks:
 
-- The smallest size that can be allocated is 16 bytes.
-- Sizes which aren't divisible by 16 will be rounded up.
-- It probably fragments easily.
+- It allocates a minimum of 16 bytes.
+- It rounds up sizes not divisible by 16.
+- It may fragment easily.
 
 ## Credits
 
-The algorithm is taken from Donald Knuth's first-fit memory allocator in The
-Art of Computer Programming Vol. 1.
+This implements Donald Knuth's first-fit memory allocator from The Art of Computer Programming Vol. 1.
