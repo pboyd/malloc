@@ -1,12 +1,12 @@
 package malloc
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
 	"math"
 	"reflect"
+	"slices"
 	"unsafe"
 
 	"golang.org/x/exp/constraints"
@@ -19,12 +19,29 @@ const wordSize = 16
 // the Arena to satisfy the request.
 var ErrOutOfMemory = errors.New("out of memory")
 
-// Arena holds a fixed amount of memory which can be allocated.
+// Opt is a configuration option passed to NewArena or NewArenaAt.
+type Opt func(*Arena)
+
+// Expander is used to manage the larger chunks of memory that the arena
+// manages.
+func Expander(expander ArenaExpander) Opt {
+	return func(a *Arena) {
+		a.expander = expander
+	}
+}
+
+// Arena holds an amount of memory which can be allocated.
 //
 // Arena is not safe for concurrent use. Use a mutex if it will be used in
 // multiple goroutines.
 type Arena struct {
-	buf [][2]uint64
+	buf      [][2]uint64
+	expander ArenaExpander
+
+	// archive contains old versions of buf from before an expansion which
+	// still contain allocated memory. When all pointers have been freed
+	// these will be removed.
+	archive [][][2]uint64
 }
 
 // NewArena makes a new arena of the given size. If the size is not evenly
@@ -35,7 +52,10 @@ type Arena struct {
 //
 // The arena requires 16 bytes for the initial block header, so the maximum
 // allocatable size in the arena will be size - 16 bytes.
-func NewArena(size uint64) *Arena {
+//
+// By default, NewArena manages a fixed amount of memory obtained from a
+// standard Go slice.
+func NewArena(size uint64, opts ...Opt) *Arena {
 	if size%wordSize != 0 {
 		size += wordSize - size%wordSize
 	}
@@ -43,7 +63,20 @@ func NewArena(size uint64) *Arena {
 		return nil
 	}
 
-	return NewArenaAt(make([]byte, size))
+	arena := &Arena{
+		expander: fixedExpander{},
+	}
+	for _, opt := range opts {
+		opt(arena)
+	}
+
+	buf, err := arena.expander.Grow(nil, uintptr(size))
+	if err != nil {
+		return nil
+	}
+	arena.buf = byteSliceToInternal(buf)
+
+	return arena.init()
 }
 
 // NewArenaAt creates a new Arena that will allocate memory inside the given
@@ -56,13 +89,26 @@ func NewArena(size uint64) *Arena {
 // type.
 //
 // The caller should not modify buf directly after passing it to NewArenaAt.
-func NewArenaAt[T any](buf []T) *Arena {
+func NewArenaAt[T any](buf []T, opts ...Opt) *Arena {
 	addr := unsafe.SliceData(buf)
 	if addr == nil {
 		return nil
 	}
 
+	arena := &Arena{
+		expander: fixedExpander{},
+	}
+	for _, opt := range opts {
+		opt(arena)
+	}
+
 	words := uintptr(cap(buf)) * unsafe.Sizeof(*addr) / wordSize
+	arena.buf = unsafe.Slice((*[2]uint64)(unsafe.Pointer(addr)), words)
+	return arena.init()
+}
+
+func (a *Arena) init() *Arena {
+	words := len(a.buf)
 	if words < 2 {
 		// Not enough space for even the initial free blocks.
 		return nil
@@ -74,41 +120,39 @@ func NewArenaAt[T any](buf []T) *Arena {
 		words = math.MaxUint32/wordSize - 1
 	}
 
-	a := &Arena{
-		buf: unsafe.Slice((*[2]uint64)(unsafe.Pointer(addr)), words),
-	}
-
 	// Layout the initial memory:
 	// - The first free block has no space, it exists to point to the first
 	//   actual free block. Which is initially the second block
 	// - The second block has all the space which isn't in the first block.
 
-	second := a.index(1)
+	second := index(a.buf, 1)
 	second.size = uint32(words) - 1
 
-	first := a.index(0)
+	first := index(a.buf, 0)
 	first.next = second
 
 	return a
 }
 
-// Size returns the total amount of memory (in bytes) managed by the arena.
+// Size returns the amount of memory (in bytes) managed by the arena. Note that
+// this does not include the size of old memory areas that are preserved after
+// the arena grows.
 func (a *Arena) Size() int {
 	return len(a.buf) * wordSize
 }
 
-// Cap returns the total amount of usable memory in the arena.
+// Cap returns the total amount of allocatable memory in the arena.
 func (a *Arena) Cap() int {
 	return a.Size() - int(wordSize)
 }
 
-// FreeBytes returns the amount of unallocated space in the arena.
+// FreeBytes returns the amount of allocatable space in the arena.
 //
 // This requires walking the list of free blocks, so it can be slow.
 func (a *Arena) FreeBytes() int {
 	freeWords := 0
 
-	for q := a.index(0); q != nil; q = q.next {
+	for q := index(a.buf, 0); q != nil; q = q.next {
 		freeWords += int(q.size)
 	}
 
@@ -132,7 +176,7 @@ func (a *Arena) Malloc(size uintptr) (unsafe.Pointer, error) {
 
 	// Search through the list of free blocks looking for one big enough to hold
 	// the requested size.
-	q := a.index(0)
+	q := index(a.buf, 0)
 	p := q.next
 	for p != nil && p.size < words {
 		q = p
@@ -140,7 +184,12 @@ func (a *Arena) Malloc(size uintptr) (unsafe.Pointer, error) {
 	}
 
 	if p == nil {
-		return nil, ErrOutOfMemory
+		// No space left, attempt to grow the buffer.
+		err := a.grow(size)
+		if err != nil {
+			return nil, err
+		}
+		return a.Malloc(size)
 	}
 
 	// We can fit the amount requested in p, and q is block immediately before p.
@@ -156,6 +205,62 @@ func (a *Arena) Malloc(size uintptr) (unsafe.Pointer, error) {
 	}
 
 	return p.Pointer(k), nil
+}
+
+func (a *Arena) grow(size uintptr) error {
+	originalLen := uint32(len(a.buf))
+	originalEnd := uintptr(unsafe.Pointer(unsafe.SliceData(a.buf))) + (uintptr(len(a.buf)) * wordSize)
+
+	buf, err := a.expander.Grow(internalToByteSlice(a.buf), size)
+	if err != nil {
+		return err
+	}
+
+	isNewBuf := unsafe.Pointer(unsafe.SliceData(a.buf)) != unsafe.Pointer(unsafe.SliceData(buf))
+	if isNewBuf {
+		// We got a new buffer instead of just a larger version of the
+		// old one. If it's empty, then we'll free it right now.
+		// Otherwise, we need to keep a copy to it so that we can free
+		// the memory we've already allocated there.
+		if isEmpty(a.buf) {
+			if freeableExpander, ok := a.expander.(FreeableArenaExpander); ok {
+				freeableExpander.Free(internalToByteSlice(a.buf))
+			}
+		} else {
+			// Keep a copy of the old buffer. We won't allocate anything
+			// new there, but there are still pointers to it.
+			a.archive = append(a.archive, a.buf)
+		}
+	}
+
+	a.buf = byteSliceToInternal(buf)
+
+	if !isNewBuf {
+		// Find the last free block
+		lastFreeBlock := index(a.buf, 0)
+		p := lastFreeBlock.next
+		for p != nil {
+			lastFreeBlock = p
+			p = lastFreeBlock.next
+		}
+
+		if uintptr(unsafe.Pointer(lastFreeBlock))+uintptr(lastFreeBlock.size)*wordSize == originalEnd {
+			// The last free block went right up to the end of the
+			// old buffer, so increase that free block with all the
+			// words in the new space.
+			newEnd := uintptr(unsafe.Pointer(unsafe.SliceData(a.buf))) + (uintptr(len(a.buf)) * wordSize)
+			lastFreeBlock.size += uint32((newEnd - originalEnd) / wordSize)
+		} else {
+			// Insert a new free block and point to it.
+			newBlock := index(a.buf, originalLen)
+			newBlock.size = uint32(len(a.buf)) - originalLen
+			lastFreeBlock.next = newBlock
+		}
+	} else {
+		a.init()
+	}
+
+	return nil
 }
 
 // Free deallocates a specific number of bytes of memory starting at the
@@ -184,13 +289,41 @@ func (a *Arena) Free(x unsafe.Pointer, size uintptr) {
 		panic(fmt.Sprintf("attempted to free non-word aligned pointer: %v", x))
 	}
 
-	words := uintptrToWords(size)
+	p := (*byte)(x)
 
-	p := (*blockHeader)(x)
-	if !contains(p, a.buf) {
-		panic("attempted to free a pointer that is not in arena")
+	// First check if we have a pointer to our active buffer
+	if contains(p, a.buf) {
+		a.freeFromBuf(x, size, a.buf)
+		return
 	}
 
+	// The pointer was not to the active buffer, so look for it in one of the other buffers
+	for i, oldBuf := range a.archive {
+		if contains(p, oldBuf) {
+			a.freeFromBuf(x, size, oldBuf)
+
+			// If that was the last pointer in the archive buffer
+			// remove the reference to it.
+			if isEmpty(oldBuf) {
+				if freeableExpander, ok := a.expander.(FreeableArenaExpander); ok {
+					freeableExpander.Free(internalToByteSlice(oldBuf))
+				}
+
+				// This delete would cause problems with the
+				// loop, but we're returning anyway.
+				a.archive = slices.Delete(a.archive, i, i+1)
+			}
+
+			return
+		}
+	}
+
+	// It's not a pointer to anything managed by this package.
+	panic("attempted to free a pointer that is not in arena")
+
+}
+
+func (*Arena) freeFromBuf(x unsafe.Pointer, size uintptr, buf [][2]uint64) {
 	// Search through the free list to find the entries immediately before
 	// and after the area to be freed, or the end of the list, whichever
 	// comes first.
@@ -198,7 +331,11 @@ func (a *Arena) Free(x unsafe.Pointer, size uintptr) {
 	// This assumes that later entries in the free list have greater memory
 	// addresses.
 
-	before := a.index(0)
+	words := uintptrToWords(size)
+
+	p := (*blockHeader)(x)
+
+	before := index(buf, 0)
 	after := before.next
 	for after != nil && addrOf(after) < addrOf(p) {
 		before = after
@@ -267,12 +404,7 @@ func (a *Arena) Free(x unsafe.Pointer, size uintptr) {
 // Raw makes a copy of the memory for debugging.
 func (a *Arena) Raw() []byte {
 	buf := make([]byte, len(a.buf)*wordSize)
-	for i, v := range a.buf {
-		offset := i * wordSize
-		binary.LittleEndian.PutUint64(buf[offset:offset+8], v[0])
-		offset += 8
-		binary.LittleEndian.PutUint64(buf[offset:offset+8], v[1])
-	}
+	copy(buf, internalToByteSlice(a.buf))
 	return buf
 }
 
@@ -287,8 +419,19 @@ func (a *Arena) Contains(p any) bool {
 
 // index assumes that the entire buffer is filled with blockHeaders and returns
 // the nth one. This is generally unsafe, except for index 0 and 1.
-func (a *Arena) index(n uint32) *blockHeader {
-	return (*blockHeader)(unsafe.Pointer(&a.buf[n]))
+func index(buf [][2]uint64, n uint32) *blockHeader {
+	return (*blockHeader)(unsafe.Pointer(&buf[n]))
+}
+
+func isEmpty(buf [][2]uint64) bool {
+	first := index(buf, 0)
+	if first.size == 0 {
+		second := first.next
+		if second != nil && second.size == uint32(len(buf)-1) {
+			return true
+		}
+	}
+	return false
 }
 
 // Malloc allocates a pointer of an arbitrary type in the arena.
@@ -459,4 +602,12 @@ func contains[T any](ptr *T, buf [][2]uint64) bool {
 
 func addrOf[T any](p *T) uintptr {
 	return uintptr(unsafe.Pointer(p))
+}
+
+func byteSliceToInternal(buf []byte) [][2]uint64 {
+	return unsafe.Slice((*[2]uint64)(unsafe.Pointer(unsafe.SliceData(buf))), len(buf)>>4)
+}
+
+func internalToByteSlice(buf [][2]uint64) []byte {
+	return unsafe.Slice((*byte)(unsafe.Pointer(unsafe.SliceData(buf))), len(buf)<<4)
 }
