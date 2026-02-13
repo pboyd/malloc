@@ -413,7 +413,20 @@ func (a *Arena) Raw() []byte {
 // Panics if p is not a pointer.
 func (a *Arena) Contains(p any) bool {
 	addr := uintptr(reflect.ValueOf(p).UnsafePointer())
-	return addr >= uintptr(unsafe.Pointer(&a.buf[0])) && addr <= uintptr(unsafe.Pointer(&a.buf[len(a.buf)-1]))
+
+	// Check the active buffer
+	if containsAddr(addr, a.buf) {
+		return true
+	}
+
+	// Check archived buffers
+	for _, oldBuf := range a.archive {
+		if containsAddr(addr, oldBuf) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // index assumes that the entire buffer is filled with blockHeaders and returns
@@ -595,12 +608,15 @@ func (b *blockHeader) Pointer(n uint32) unsafe.Pointer {
 // contains returns true if the pointer is contained inside the provided
 // buffer.
 func contains[T any](ptr *T, buf [][2]uint64) bool {
-	addr := addrOf(ptr)
-	return addr >= uintptr(unsafe.Pointer(&buf[0])) && addr <= uintptr(unsafe.Pointer(&buf[len(buf)-1]))
+	return containsAddr(addrOf(ptr), buf)
 }
 
 func addrOf[T any](p *T) uintptr {
 	return uintptr(unsafe.Pointer(p))
+}
+
+func containsAddr(addr uintptr, buf [][2]uint64) bool {
+	return addr >= uintptr(unsafe.Pointer(&buf[0])) && addr <= uintptr(unsafe.Pointer(&buf[len(buf)-1]))
 }
 
 func byteSliceToInternal(buf []byte) [][2]uint64 {
