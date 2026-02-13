@@ -4,10 +4,12 @@ package malloc
 type ArenaBackend interface {
 	// Grow is called when an Arena requires more memory.
 	//
-	// size is the minimum amount of new space to add, but Grow may return
-	// a larger buffer than requested.
+	// size is the minimum amount of new space to add. The returned buffer
+	// must be at least len(buf)+size bytes, but Grow may return a larger
+	// buffer than requested.
 	//
-	// If no more space is available, Grow returns ErrOutOfMemory.
+	// If the backend cannot provide at least size additional bytes, Grow
+	// must return ErrOutOfMemory.
 	//
 	// buf will be nil the first time Grow is called. Ideally, Grow returns
 	// a larger slice with the same starting address as buf, but if

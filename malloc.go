@@ -215,6 +215,11 @@ func (a *Arena) grow(size uintptr) error {
 		return err
 	}
 
+	// Verify the backend grew the buffer by at least the requested size
+	if len(buf) < len(a.buf)+int(size) {
+		return ErrOutOfMemory
+	}
+
 	isNewBuf := unsafe.Pointer(unsafe.SliceData(a.buf)) != unsafe.Pointer(unsafe.SliceData(buf))
 	if isNewBuf {
 		// We got a new buffer instead of just a larger version of the
