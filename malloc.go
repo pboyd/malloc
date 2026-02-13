@@ -22,11 +22,10 @@ var ErrOutOfMemory = errors.New("out of memory")
 // Opt is a configuration option passed to NewArena or NewArenaAt.
 type Opt func(*Arena)
 
-// Expander is used to manage the larger chunks of memory that the arena
-// manages.
-func Expander(expander ArenaExpander) Opt {
+// Backend is used to manage the underlying memory for the arena.
+func Backend(backend ArenaBackend) Opt {
 	return func(a *Arena) {
-		a.expander = expander
+		a.backend = backend
 	}
 }
 
@@ -35,8 +34,8 @@ func Expander(expander ArenaExpander) Opt {
 // Arena is not safe for concurrent use. Use a mutex if it will be used in
 // multiple goroutines.
 type Arena struct {
-	buf      [][2]uint64
-	expander ArenaExpander
+	buf     [][2]uint64
+	backend ArenaBackend
 
 	// archive contains old versions of buf from before an expansion which
 	// still contain allocated memory. When all pointers have been freed
@@ -64,13 +63,13 @@ func NewArena(size uint64, opts ...Opt) *Arena {
 	}
 
 	arena := &Arena{
-		expander: fixedExpander{},
+		backend: fixedBackend{},
 	}
 	for _, opt := range opts {
 		opt(arena)
 	}
 
-	buf, err := arena.expander.Grow(nil, uintptr(size))
+	buf, err := arena.backend.Grow(nil, uintptr(size))
 	if err != nil {
 		return nil
 	}
@@ -96,7 +95,7 @@ func NewArenaAt[T any](buf []T, opts ...Opt) *Arena {
 	}
 
 	arena := &Arena{
-		expander: fixedExpander{},
+		backend: fixedBackend{},
 	}
 	for _, opt := range opts {
 		opt(arena)
@@ -211,7 +210,7 @@ func (a *Arena) grow(size uintptr) error {
 	originalLen := uint32(len(a.buf))
 	originalEnd := uintptr(unsafe.Pointer(unsafe.SliceData(a.buf))) + (uintptr(len(a.buf)) * wordSize)
 
-	buf, err := a.expander.Grow(internalToByteSlice(a.buf), size)
+	buf, err := a.backend.Grow(internalToByteSlice(a.buf), size)
 	if err != nil {
 		return err
 	}
@@ -223,8 +222,8 @@ func (a *Arena) grow(size uintptr) error {
 		// Otherwise, we need to keep a copy to it so that we can free
 		// the memory we've already allocated there.
 		if isEmpty(a.buf) {
-			if freeableExpander, ok := a.expander.(FreeableArenaExpander); ok {
-				freeableExpander.Free(internalToByteSlice(a.buf))
+			if freeableBackend, ok := a.backend.(FreeableArenaBackend); ok {
+				freeableBackend.Free(internalToByteSlice(a.buf))
 			}
 		} else {
 			// Keep a copy of the old buffer. We won't allocate anything
@@ -305,8 +304,8 @@ func (a *Arena) Free(x unsafe.Pointer, size uintptr) {
 			// If that was the last pointer in the archive buffer
 			// remove the reference to it.
 			if isEmpty(oldBuf) {
-				if freeableExpander, ok := a.expander.(FreeableArenaExpander); ok {
-					freeableExpander.Free(internalToByteSlice(oldBuf))
+				if freeableBackend, ok := a.backend.(FreeableArenaBackend); ok {
+					freeableBackend.Free(internalToByteSlice(oldBuf))
 				}
 
 				// This delete would cause problems with the

@@ -6,10 +6,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSliceExpander(t *testing.T) {
+func TestSliceBackend(t *testing.T) {
 	assert := assert.New(t)
 
-	a := NewArena(64, Expander(SliceExpander))
+	a := NewArena(64, Backend(SliceBackend))
 	p1, err := Malloc[[64 - wordSize]byte](a)
 	if !assert.NoError(err) {
 		return
@@ -27,11 +27,11 @@ func TestSliceExpander(t *testing.T) {
 	assert.Equal(128-wordSize, a.Cap())
 }
 
-type growingSliceExpander struct {
+type growingSliceBackend struct {
 	s []byte
 }
 
-func (e *growingSliceExpander) Grow(buf []byte, size uintptr) ([]byte, error) {
+func (e *growingSliceBackend) Grow(buf []byte, size uintptr) ([]byte, error) {
 	newSize := len(buf) + int(size)
 	if newSize > cap(e.s) {
 		return nil, ErrOutOfMemory
@@ -39,11 +39,11 @@ func (e *growingSliceExpander) Grow(buf []byte, size uintptr) ([]byte, error) {
 	return e.s[:newSize], nil
 }
 
-func TestGrowingExpander(t *testing.T) {
+func TestGrowingBackend(t *testing.T) {
 	t.Run("Grow from full", func(t *testing.T) {
 		assert := assert.New(t)
 
-		a := NewArena(64, Expander(&growingSliceExpander{s: make([]byte, 128)}))
+		a := NewArena(64, Backend(&growingSliceBackend{s: make([]byte, 128)}))
 		p1, err := Malloc[[64 - wordSize]byte](a)
 		if !assert.NoError(err) {
 			return
@@ -65,7 +65,7 @@ func TestGrowingExpander(t *testing.T) {
 	t.Run("Grow from empty", func(t *testing.T) {
 		assert := assert.New(t)
 
-		a := NewArena(48, Expander(&growingSliceExpander{s: make([]byte, 128)}))
+		a := NewArena(48, Backend(&growingSliceBackend{s: make([]byte, 128)}))
 		p1, err := Malloc[[80]byte](a)
 		if !assert.NoError(err) {
 			return
@@ -81,7 +81,7 @@ func TestGrowingExpander(t *testing.T) {
 	t.Run("Grow from fragmented", func(t *testing.T) {
 		assert := assert.New(t)
 
-		a := NewArena(64, Expander(&growingSliceExpander{s: make([]byte, 128)}))
+		a := NewArena(64, Backend(&growingSliceBackend{s: make([]byte, 128)}))
 		p3, _ := a.Malloc(16)
 		p2, _ := a.Malloc(16)
 		p1, _ := a.Malloc(16)

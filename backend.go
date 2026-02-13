@@ -1,7 +1,7 @@
 package malloc
 
-// ArenaExpander is the interface to allocate the underlying memory for an Arena.
-type ArenaExpander interface {
+// ArenaBackend is the interface to allocate the underlying memory for an Arena.
+type ArenaBackend interface {
 	// Grow is called when an Arena requires more memory.
 	//
 	// size is the minimum amount of new space to add, but Grow may return
@@ -18,32 +18,32 @@ type ArenaExpander interface {
 	Grow(buf []byte, size uintptr) ([]byte, error)
 }
 
-// FreeableArenaExpander adds a method to an expander to free the underlying
+// FreeableArenaBackend adds a method to a backend to free the underlying
 // memory when all pointers have been unallocated.
 //
 // This is necessary when Grow is not able to extend the existing buffer and
 // returns a new one instead.
-type FreeableArenaExpander interface {
+type FreeableArenaBackend interface {
 	// Free is called to unallocate a buffer that was originally allocated
 	// by Grow. It is only used when Grow returns a new buffer and all
 	// pointers to the old buffer have been removed.
 	Free(buf []byte)
 }
 
-type fixedExpander struct{}
+type fixedBackend struct{}
 
-func (fixedExpander) Grow(buf []byte, size uintptr) ([]byte, error) {
+func (fixedBackend) Grow(buf []byte, size uintptr) ([]byte, error) {
 	if buf == nil {
 		return make([]byte, size), nil
 	}
 	return nil, ErrOutOfMemory
 }
 
-// SliceExpander is an ArenaExpander that allocates memory using a Go slice.
-var SliceExpander ArenaExpander = sliceExpander{}
+// SliceBackend is an ArenaBackend that allocates memory using a Go slice.
+var SliceBackend ArenaBackend = sliceBackend{}
 
-type sliceExpander struct{}
+type sliceBackend struct{}
 
-func (sliceExpander) Grow(buf []byte, size uintptr) ([]byte, error) {
+func (sliceBackend) Grow(buf []byte, size uintptr) ([]byte, error) {
 	return append(buf, make([]byte, size)...), nil
 }
