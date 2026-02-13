@@ -7,6 +7,7 @@ import (
 	"math"
 	"reflect"
 	"slices"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/exp/constraints"
@@ -31,9 +32,10 @@ func Backend(backend ArenaBackend) Opt {
 
 // Arena holds an amount of memory which can be allocated.
 //
-// Arena is not safe for concurrent use. Use a mutex if it will be used in
-// multiple goroutines.
+// Arena is safe for concurrent use.
 type Arena struct {
+	mu sync.RWMutex
+
 	buf     [][2]uint64
 	backend ArenaBackend
 
@@ -137,6 +139,9 @@ func (a *Arena) init() *Arena {
 // this does not include the size of old memory areas that are preserved after
 // the arena grows.
 func (a *Arena) Size() int {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
 	return len(a.buf) * wordSize
 }
 
@@ -149,6 +154,9 @@ func (a *Arena) Cap() int {
 //
 // This requires walking the list of free blocks, so it can be slow.
 func (a *Arena) FreeBytes() int {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
 	freeWords := 0
 
 	for q := index(a.buf, 0); q != nil; q = q.next {
@@ -173,14 +181,10 @@ func (a *Arena) Malloc(size uintptr) (unsafe.Pointer, error) {
 
 	words := uintptrToWords(size)
 
-	// Search through the list of free blocks looking for one big enough to hold
-	// the requested size.
-	q := index(a.buf, 0)
-	p := q.next
-	for p != nil && p.size < words {
-		q = p
-		p = q.next
-	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	p, q := a.findFirst(words)
 
 	if p == nil {
 		// No space left, attempt to grow the buffer.
@@ -188,7 +192,12 @@ func (a *Arena) Malloc(size uintptr) (unsafe.Pointer, error) {
 		if err != nil {
 			return nil, err
 		}
-		return a.Malloc(size)
+
+		p, q = a.findFirst(words)
+		if p == nil {
+			// Still not enough space? That shouldn't happen.
+			return nil, ErrOutOfMemory
+		}
 	}
 
 	// We can fit the amount requested in p, and q is block immediately before p.
@@ -204,6 +213,19 @@ func (a *Arena) Malloc(size uintptr) (unsafe.Pointer, error) {
 	}
 
 	return p.Pointer(k), nil
+}
+
+// findFirst searches through the list of free blocks looking for one big
+// enough to hold the requested size. p is the block with the required space
+// and q is block immediately before it.
+func (a *Arena) findFirst(words uint32) (p, q *blockHeader) {
+	q = index(a.buf, 0)
+	p = q.next
+	for p != nil && p.size < words {
+		q = p
+		p = q.next
+	}
+	return
 }
 
 func (a *Arena) grow(size uintptr) error {
@@ -294,6 +316,9 @@ func (a *Arena) Free(x unsafe.Pointer, size uintptr) {
 	}
 
 	p := (*byte)(x)
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
 	// First check if we have a pointer to our active buffer
 	if contains(p, a.buf) {
@@ -407,6 +432,9 @@ func (*Arena) freeFromBuf(x unsafe.Pointer, size uintptr, buf [][2]uint64) {
 
 // Raw makes a copy of the memory for debugging.
 func (a *Arena) Raw() []byte {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
 	buf := make([]byte, len(a.buf)*wordSize)
 	copy(buf, internalToByteSlice(a.buf))
 	return buf
@@ -417,6 +445,9 @@ func (a *Arena) Raw() []byte {
 //
 // Panics if p is not a pointer.
 func (a *Arena) Contains(p any) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
 	addr := uintptr(reflect.ValueOf(p).UnsafePointer())
 
 	// Check the active buffer
