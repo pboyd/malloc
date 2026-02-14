@@ -1,6 +1,6 @@
 // TODO: This should work for other BSD systems too, figure out which ones and update this tag:
 
-//go:build linux || darwin
+//go:build linux || darwin || windows
 
 package malloc
 
@@ -10,13 +10,13 @@ import (
 	"syscall"
 )
 
-// MmapBackend returns an ArenaBackend that allocates memory via mmap(2). This
-// is only available when compiling for Linux or Darwin (other BSD variants
-// would likely work if the build flags were updated--PRs are welcome if you're
-// willing to test it).
+// MmapBackend returns an ArenaBackend that allocates memory via mmap(2) (or
+// VirtualAlloc on Windows). This is only available when compiling for Windows,
+// Linux or Darwin (other BSD variants would likely work if the build flags
+// were updated--PRs are welcome if you're willing to test it).
 //
-// prot and flags are OR'd with the defaults required and passed through to
-// mmap.
+// prot and flags are OR'd with the required defaults and passed through to
+// underlying system calls. The supported values are platform-specific.
 func MmapBackend(prot int, flags int) ArenaBackend {
 	return &mmapBackend{
 		prot:  prot,
