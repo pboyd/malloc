@@ -29,7 +29,7 @@ type FreeableArenaBackend interface {
 	// Free is called to unallocate a buffer that was originally allocated
 	// by Grow. It is only used when Grow returns a new buffer and all
 	// pointers to the old buffer have been removed.
-	Free(buf []byte)
+	Free(buf []byte) error
 }
 
 type fixedBackend struct{}
