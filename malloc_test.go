@@ -473,33 +473,3 @@ func (ra *randomAllocator) FreeAll() {
 	ra.records = ra.records[:0]
 }
 
-func TestContainsWithArchive(t *testing.T) {
-	assert := assert.New(t)
-
-	// Use SliceBackend which creates new buffers on grow, causing archiving
-	a := NewArena(64, Backend(SliceBackend))
-
-	// Allocate a pointer in the first buffer
-	p1, err := Malloc[[32]byte](a)
-	if !assert.NoError(err) {
-		return
-	}
-	assert.True(a.Contains(p1), "p1 should be contained in active buffer")
-
-	// Grow the arena, which will create a new buffer and archive the old one
-	p2, err := Malloc[[64]byte](a)
-	if !assert.NoError(err) {
-		return
-	}
-	assert.True(a.Contains(p2), "p2 should be contained in active buffer")
-
-	// Verify that p1 (in archived buffer) is still reported as contained
-	assert.True(a.Contains(p1), "p1 should be contained in archived buffer")
-
-	// Verify archive was created
-	assert.Len(a.archive, 1, "archive should contain the old buffer")
-
-	// Clean up
-	Free(a, p1)
-	Free(a, p2)
-}

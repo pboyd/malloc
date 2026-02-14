@@ -238,7 +238,8 @@ func (a *Arena) grow(size uintptr) error {
 	}
 
 	// Verify the backend grew the buffer by at least the requested size
-	if len(buf) < len(a.buf)+int(size) {
+	// len(a.buf) is in words (16-byte units), so we need to convert to bytes
+	if len(buf) < len(a.buf)*wordSize+int(size) {
 		return ErrOutOfMemory
 	}
 
@@ -250,7 +251,11 @@ func (a *Arena) grow(size uintptr) error {
 		// the memory we've already allocated there.
 		if isEmpty(a.buf) {
 			if freeableBackend, ok := a.backend.(FreeableArenaBackend); ok {
-				freeableBackend.Free(internalToByteSlice(a.buf))
+				err := freeableBackend.Free(internalToByteSlice(a.buf))
+				if err != nil {
+					// Not fatal
+					log.Printf("unable to free backing memory: %v", err)
+				}
 			}
 		} else {
 			// Keep a copy of the old buffer. We won't allocate anything
@@ -335,7 +340,10 @@ func (a *Arena) Free(x unsafe.Pointer, size uintptr) {
 			// remove the reference to it.
 			if isEmpty(oldBuf) {
 				if freeableBackend, ok := a.backend.(FreeableArenaBackend); ok {
-					freeableBackend.Free(internalToByteSlice(oldBuf))
+					err := freeableBackend.Free(internalToByteSlice(oldBuf))
+					if err != nil {
+						log.Printf("unable to free backing memory: %v", err)
+					}
 				}
 
 				// This delete would cause problems with the
