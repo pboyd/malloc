@@ -238,7 +238,8 @@ func (a *Arena) grow(size uintptr) error {
 	}
 
 	// Verify the backend grew the buffer by at least the requested size
-	if len(buf) < len(a.buf)+int(size) {
+	// len(a.buf) is in words (16-byte units), so we need to convert to bytes
+	if len(buf) < len(a.buf)*wordSize+int(size) {
 		return ErrOutOfMemory
 	}
 
