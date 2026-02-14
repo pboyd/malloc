@@ -4,7 +4,8 @@
 
 This is a memory allocator for Go. The arena holds a chunk of memory and hands
 it out as needed, similar to `malloc(3)`. By default, the underlying memory is
-taken from Go's heap, but the `MmapBackend` allocates memory through `mmap(2)`.
+taken from Go's heap, but the `MmapBackend` allocates memory through `mmap(2)`
+(or `VirtualAlloc` on Windows).
 
 Basic usage:
 
