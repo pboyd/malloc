@@ -11,7 +11,9 @@ import (
 )
 
 // MmapBackend returns an ArenaBackend that allocates memory via mmap(2). This
-// is only available when compiling for Linux and Darwin.
+// is only available when compiling for Linux or Darwin (other BSD variants
+// would likely work if the build flags were updated--PRs are welcome if you're
+// willing to test it).
 //
 // prot and flags are OR'd with the defaults required and passed through to
 // mmap.
