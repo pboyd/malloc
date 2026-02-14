@@ -2,6 +2,7 @@ package malloc
 
 import (
 	"math/rand"
+	"os"
 	"runtime"
 	"sync"
 	"testing"
@@ -14,92 +15,101 @@ import (
 // any ArenaBackend implementation. The factory function should return a fresh
 // backend instance for each subtest.
 func runBackendGrowthTests(t *testing.T, backendName string, factory func() ArenaBackend) {
+	pageSize := os.Getpagesize()
+
 	t.Run(backendName, func(t *testing.T) {
 		t.Run("GrowFromFull", func(t *testing.T) {
 			assert := assert.New(t)
 
-			a := NewArena(64, Backend(factory()))
-			p1, err := Malloc[[64 - wordSize]byte](a)
+			a := NewArena(uint64(pageSize), Backend(factory()))
+			// First allocation fills exactly one page
+			p1, err := a.Malloc(uintptr(pageSize - wordSize))
 			if !assert.NoError(err) {
 				return
 			}
 
 			// Fill the first allocation with a pattern
-			for i := range p1 {
-				p1[i] = 0xAA
+			s1 := unsafe.Slice((*byte)(p1), pageSize-wordSize)
+			for i := range s1 {
+				s1[i] = 0xAA
 			}
 
 			// This should trigger a grow since arena is full
-			p2, err := Malloc[[64]byte](a)
+			p2, err := a.Malloc(uintptr(pageSize))
 			if !assert.NoError(err) {
 				return
 			}
 
 			// Fill the second allocation with a different pattern
-			for i := range p2 {
-				p2[i] = 0xBB
+			s2 := unsafe.Slice((*byte)(p2), pageSize)
+			for i := range s2 {
+				s2[i] = 0xBB
 			}
 
 			// Verify both allocations maintained their data
-			for i := range p1 {
-				assert.Equal(byte(0xAA), p1[i], "first allocation should be unchanged")
+			for i := range s1 {
+				assert.Equal(byte(0xAA), s1[i], "first allocation should be unchanged")
 			}
-			for i := range p2 {
-				assert.Equal(byte(0xBB), p2[i], "second allocation should be intact")
+			for i := range s2 {
+				assert.Equal(byte(0xBB), s2[i], "second allocation should be intact")
 			}
 
-			Free(a, p1)
-			Free(a, p2)
+			a.Free(p1, uintptr(pageSize-wordSize))
+			a.Free(p2, uintptr(pageSize))
 		})
 
 		t.Run("GrowFromEmpty", func(t *testing.T) {
 			assert := assert.New(t)
 
-			a := NewArena(48, Backend(factory()))
-			p1, err := Malloc[[80]byte](a)
+			a := NewArena(uint64(pageSize), Backend(factory()))
+			// Single allocation exceeds one page
+			size := pageSize * 2
+			p1, err := a.Malloc(uintptr(size))
 			if !assert.NoError(err) {
 				return
 			}
 
 			// Write some data to verify memory is usable
-			for i := range p1 {
-				p1[i] = byte(i)
+			s1 := unsafe.Slice((*byte)(p1), size)
+			for i := range s1 {
+				s1[i] = byte(i % 256)
 			}
 
 			// Verify data was written correctly
-			for i := range p1 {
-				assert.Equal(byte(i), p1[i])
+			for i := range s1 {
+				assert.Equal(byte(i%256), s1[i])
 			}
 
-			Free(a, p1)
+			a.Free(p1, uintptr(size))
 
 			// Arena should have grown to accommodate the allocation
-			assert.GreaterOrEqual(a.Cap(), 80)
+			assert.GreaterOrEqual(a.Cap(), size)
 		})
 
 		t.Run("GrowFromFragmented", func(t *testing.T) {
 			assert := assert.New(t)
 
-			a := NewArena(64, Backend(factory()))
-			p3, _ := a.Malloc(16)
-			p2, _ := a.Malloc(16)
-			p1, _ := a.Malloc(16)
+			a := NewArena(uint64(pageSize), Backend(factory()))
+			smallSize := pageSize / 4
+			p3, _ := a.Malloc(uintptr(smallSize))
+			p2, _ := a.Malloc(uintptr(smallSize))
+			p1, _ := a.Malloc(uintptr(smallSize))
 
 			// Write patterns to each allocation
-			s1 := unsafe.Slice((*byte)(p1), 16)
-			s2 := unsafe.Slice((*byte)(p2), 16)
-			s3 := unsafe.Slice((*byte)(p3), 16)
-			for i := 0; i < 16; i++ {
+			s1 := unsafe.Slice((*byte)(p1), smallSize)
+			s2 := unsafe.Slice((*byte)(p2), smallSize)
+			s3 := unsafe.Slice((*byte)(p3), smallSize)
+			for i := 0; i < smallSize; i++ {
 				s1[i] = 0x11
 				s2[i] = 0x22
 				s3[i] = 0x33
 			}
 
 			// Free the middle creating a hole
-			a.Free(p2, 16)
+			a.Free(p2, uintptr(smallSize))
 
 			// This allocation is too large for the hole and should trigger growth
-			p4, err := a.Malloc(64)
+			p4, err := a.Malloc(uintptr(pageSize))
 			if !assert.NoError(err) {
 				return
 			}
@@ -109,25 +119,26 @@ func runBackendGrowthTests(t *testing.T, backendName string, factory func() Aren
 			assert.Equal(byte(0x33), s3[0])
 
 			// Write to the new allocation
-			s4 := unsafe.Slice((*byte)(p4), 64)
-			for i := 0; i < 64; i++ {
+			s4 := unsafe.Slice((*byte)(p4), pageSize)
+			for i := 0; i < pageSize; i++ {
 				s4[i] = 0x44
 			}
 			assert.Equal(byte(0x44), s4[0])
 
-			a.Free(p1, 16)
-			a.Free(p3, 16)
-			a.Free(p4, 64)
+			a.Free(p1, uintptr(smallSize))
+			a.Free(p3, uintptr(smallSize))
+			a.Free(p4, uintptr(pageSize))
 		})
 
 		t.Run("MultipleGrows", func(t *testing.T) {
 			assert := assert.New(t)
 
-			a := NewArena(64, Backend(factory()))
+			a := NewArena(uint64(pageSize), Backend(factory()))
 
 			// Allocate progressively, forcing multiple grows
+			// Cumulative size is pageSize*3.75, guaranteeing multiple growths
 			allocations := make([]unsafe.Pointer, 0, 10)
-			sizes := []int{16, 32, 64, 128, 256}
+			sizes := []int{pageSize / 4, pageSize / 2, pageSize, pageSize * 2}
 
 			for _, size := range sizes {
 				p, err := a.Malloc(uintptr(size))
@@ -190,17 +201,19 @@ func runBackendGrowthTests(t *testing.T, backendName string, factory func() Aren
 		t.Run("ContainsWithArchive", func(t *testing.T) {
 			assert := assert.New(t)
 
-			a := NewArena(64, Backend(factory()))
+			a := NewArena(uint64(pageSize), Backend(factory()))
 
 			// Allocate a pointer in the first buffer
-			p1, err := Malloc[[32]byte](a)
+			size1 := pageSize / 2
+			p1, err := a.Malloc(uintptr(size1))
 			if !assert.NoError(err) {
 				return
 			}
 			assert.True(a.Contains(p1), "p1 should be contained in active buffer")
 
 			// Grow the arena, which may create a new buffer and archive the old one
-			p2, err := Malloc[[64]byte](a)
+			size2 := pageSize
+			p2, err := a.Malloc(uintptr(size2))
 			if !assert.NoError(err) {
 				return
 			}
@@ -210,8 +223,8 @@ func runBackendGrowthTests(t *testing.T, backendName string, factory func() Aren
 			assert.True(a.Contains(p1), "p1 should still be contained")
 
 			// Clean up
-			Free(a, p1)
-			Free(a, p2)
+			a.Free(p1, uintptr(size1))
+			a.Free(p2, uintptr(size2))
 		})
 
 		t.Run("ConcurrentGrow", func(t *testing.T) {

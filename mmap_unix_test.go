@@ -118,17 +118,19 @@ func TestMmapBackend_StressTest(t *testing.T) {
 	}
 
 	assert := assert.New(t)
-	a := NewArena(1024, Backend(MmapBackend(0, 0)))
+	pageSize := syscall.Getpagesize()
+	a := NewArena(uint64(pageSize), Backend(MmapBackend(0, 0)))
 
 	// Allocate and free many times to test growth stability
+	// Each iteration allocates a full page, forcing growth on the second iteration
 	for iter := 0; iter < 100; iter++ {
-		p, err := a.Malloc(1024)
+		p, err := a.Malloc(uintptr(pageSize))
 		if !assert.NoError(err) {
 			return
 		}
 
 		// Write pattern
-		slice := unsafe.Slice((*byte)(p), 1024)
+		slice := unsafe.Slice((*byte)(p), pageSize)
 		for i := range slice {
 			slice[i] = byte(iter % 256)
 		}
@@ -138,6 +140,6 @@ func TestMmapBackend_StressTest(t *testing.T) {
 			assert.Equal(byte(iter%256), slice[i])
 		}
 
-		a.Free(p, 1024)
+		a.Free(p, uintptr(pageSize))
 	}
 }
