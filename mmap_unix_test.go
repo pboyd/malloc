@@ -3,6 +3,7 @@
 package malloc
 
 import (
+	"errors"
 	"math"
 	"syscall"
 	"testing"
@@ -81,6 +82,9 @@ func TestMmapBackend_ProtectionFlags(t *testing.T) {
 	// Test with different protection flags
 	backend := MmapBackend(syscall.PROT_EXEC, 0)
 	buf, err := backend.Grow(nil, 4096)
+	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
+		t.Skipf("Skipping test: %v", err)
+	}
 
 	require.NoError(t, err)
 	defer backend.(FreeableArenaBackend).Free(buf)
