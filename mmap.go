@@ -1,6 +1,6 @@
 // TODO: This should work for other BSD systems too, figure out which ones and update this tag:
 
-//go:build linux || darwin || windows
+//go:build linux || darwin || windows || openbsd || netbsd || freebsd
 
 package malloc
 
@@ -14,9 +14,8 @@ import (
 )
 
 // MmapBackend returns an ArenaBackend that allocates memory via mmap(2) (or
-// VirtualAlloc on Windows). This is only available when compiling for Windows,
-// Linux or Darwin (other BSD variants would likely work if the build flags
-// were updated--PRs are welcome if you're willing to test it).
+// VirtualAlloc on Windows). This is tested on Linux, Darwin and Windows. It is
+// confirmed to compile on some other BSD platforms, but is otherwise untested.
 //
 // prot and flags are OR'd with the required defaults and passed through to
 // underlying system calls. The supported values are platform-specific.

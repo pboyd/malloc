@@ -1,4 +1,3 @@
-// This has been tested on Linux. NetBSD also has mremap, but I haven't tested it. YMMV
 //go:build linux || netbsd
 
 package malloc
