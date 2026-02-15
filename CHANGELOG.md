@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.0] - 2026-02-15
+
+### Added
+
+- `ProtectedArenaBackend` interface for changing memory protections on allocated pages
+- `MmapBackend.Protect()` method to set page permissions on memory-mapped allocations
+- Cross-compilation verification for FreeBSD, OpenBSD, and NetBSD
+
+### Fixed
+
+- Build compatibility with BSD variants (FreeBSD, OpenBSD, NetBSD)
+
+[1.1.0]: https://github.com/pboyd/malloc/compare/v1.0.0...v1.1.0
+
 ## [1.0.0] - 2026-02-14
 
 ### Added
