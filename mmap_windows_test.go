@@ -12,4 +12,5 @@ const (
 	testProtWrite     = windows.PAGE_READWRITE // Windows doesn't have write-only
 	testProtReadWrite = windows.PAGE_READWRITE
 	testProtNone      = windows.PAGE_NOACCESS
+	testProtExec      = windows.PAGE_EXECUTE
 )

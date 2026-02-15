@@ -3,6 +3,7 @@
 package malloc
 
 import (
+	"errors"
 	"math"
 	"syscall"
 	"testing"
@@ -316,4 +317,24 @@ func TestMmapBackend_Protect_NoAccess(t *testing.T) {
 	// Set back to read-write so we can clean up without issues
 	err = protectedBackend.Protect(testProtReadWrite)
 	assert.NoError(t, err)
+}
+
+func TestMmapBackend_ProtectionFlags(t *testing.T) {
+	// Test with different protection flags
+	backend := MmapBackend(testProtExec, 0)
+	buf, err := backend.Grow(nil, 4096)
+	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
+		t.Skipf("Skipping test: %v", err)
+	}
+
+	require.NoError(t, err)
+	defer backend.(FreeableArenaBackend).Free(buf)
+
+	// Memory should be readable and writable (always added)
+	buf[0] = 42
+	assert.Equal(t, byte(42), buf[0])
+
+	// Note: We can't easily test PROT_EXEC without writing machine code
+	// but we can verify the allocation succeeds
+	assert.NotNil(t, buf)
 }
