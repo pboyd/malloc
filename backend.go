@@ -32,6 +32,20 @@ type FreeableArenaBackend interface {
 	Free(buf []byte) error
 }
 
+// ProtectedArenaBackend is an optional interface for ArenaBackend (currently
+// only supported by MmapBackend) to change the memory protections on the
+// allocated memory.
+type ProtectedArenaBackend interface {
+	// Protect changes the memory protections on currently allocated pages.
+	//
+	// prot is passed through the underlying system call and the exact
+	// value is platform-specific.
+	//
+	// This should be used with great care. Failure to do so will lead to
+	// segmentation faults.
+	Protect(prot int) error
+}
+
 type fixedBackend struct{}
 
 func (fixedBackend) Grow(buf []byte, size uintptr) ([]byte, error) {
