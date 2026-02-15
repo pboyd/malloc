@@ -122,3 +122,198 @@ func TestMmapBackend_StressTest(t *testing.T) {
 		a.Free(p, uintptr(pageSize))
 	}
 }
+
+func TestMmapBackend_ProtectedArenaBackend(t *testing.T) {
+	// Verify that mmapBackend implements ProtectedArenaBackend
+	var _ ProtectedArenaBackend = (*mmapBackend)(nil)
+
+	backend := MmapBackend(0, 0)
+	protectedBackend, ok := backend.(ProtectedArenaBackend)
+	assert.True(t, ok, "MmapBackend should implement ProtectedArenaBackend")
+	assert.NotNil(t, protectedBackend)
+}
+
+func TestMmapBackend_Protect_NoBuffers(t *testing.T) {
+	backend := MmapBackend(0, 0)
+	protectedBackend := backend.(ProtectedArenaBackend)
+
+	// Protecting when no buffers are allocated should succeed
+	err := protectedBackend.Protect(testProtReadWrite)
+	assert.NoError(t, err, "Protect should succeed with no active buffers")
+}
+
+func TestMmapBackend_Protect_SingleBuffer(t *testing.T) {
+	backend := MmapBackend(0, 0)
+	protectedBackend := backend.(ProtectedArenaBackend)
+
+	// Allocate a buffer
+	buf, err := backend.Grow(nil, 1024)
+	require.NoError(t, err)
+	defer backend.(FreeableArenaBackend).Free(buf)
+
+	// Write some data to verify buffer is writable
+	for i := range buf {
+		buf[i] = byte(i % 256)
+	}
+
+	// Protect should succeed (keeping it read-write to avoid segfault in test)
+	err = protectedBackend.Protect(testProtReadWrite)
+	assert.NoError(t, err, "Protect should succeed on allocated buffer")
+
+	// Verify we can still read after protecting with read-write permissions
+	for i := range buf {
+		assert.Equal(t, byte(i%256), buf[i])
+	}
+}
+
+func TestMmapBackend_Protect_MultipleBuffers(t *testing.T) {
+	backend := MmapBackend(0, 0)
+	protectedBackend := backend.(ProtectedArenaBackend)
+
+	// Allocate multiple buffers
+	buf1, err := backend.Grow(nil, 1024)
+	require.NoError(t, err)
+	defer backend.(FreeableArenaBackend).Free(buf1)
+
+	buf2, err := backend.Grow(nil, 2048)
+	require.NoError(t, err)
+	defer backend.(FreeableArenaBackend).Free(buf2)
+
+	buf3, err := backend.Grow(nil, 512)
+	require.NoError(t, err)
+	defer backend.(FreeableArenaBackend).Free(buf3)
+
+	// Write patterns to all buffers
+	for i := range buf1 {
+		buf1[i] = 1
+	}
+	for i := range buf2 {
+		buf2[i] = 2
+	}
+	for i := range buf3 {
+		buf3[i] = 3
+	}
+
+	// Protect all buffers (keeping them read-write)
+	err = protectedBackend.Protect(testProtReadWrite)
+	assert.NoError(t, err, "Protect should succeed on multiple buffers")
+
+	// Verify all buffers are still accessible
+	for i := range buf1 {
+		assert.Equal(t, byte(1), buf1[i])
+	}
+	for i := range buf2 {
+		assert.Equal(t, byte(2), buf2[i])
+	}
+	for i := range buf3 {
+		assert.Equal(t, byte(3), buf3[i])
+	}
+}
+
+func TestMmapBackend_Protect_AfterFree(t *testing.T) {
+	backend := MmapBackend(0, 0)
+	protectedBackend := backend.(ProtectedArenaBackend)
+
+	// Allocate and free a buffer
+	buf, err := backend.Grow(nil, 1024)
+	require.NoError(t, err)
+
+	err = backend.(FreeableArenaBackend).Free(buf)
+	require.NoError(t, err)
+
+	// Protect after freeing should succeed (no active buffers)
+	err = protectedBackend.Protect(testProtReadWrite)
+	assert.NoError(t, err, "Protect should succeed after all buffers are freed")
+}
+
+func TestMmapBackend_Protect_ChangeProtection(t *testing.T) {
+	backend := MmapBackend(0, 0)
+	protectedBackend := backend.(ProtectedArenaBackend)
+
+	// Allocate a buffer
+	buf, err := backend.Grow(nil, 4096)
+	require.NoError(t, err)
+	defer backend.(FreeableArenaBackend).Free(buf)
+
+	// Write initial data
+	for i := 0; i < len(buf); i++ {
+		buf[i] = byte(i % 256)
+	}
+
+	// Change to read-only protection
+	err = protectedBackend.Protect(testProtRead)
+	assert.NoError(t, err, "Protect should succeed when changing to read-only")
+
+	// Verify data is still readable
+	for i := 0; i < len(buf); i++ {
+		assert.Equal(t, byte(i%256), buf[i], "data should be readable after read-only protection")
+	}
+
+	// Change back to read-write
+	err = protectedBackend.Protect(testProtReadWrite)
+	assert.NoError(t, err, "Protect should succeed when changing to read-write")
+
+	// Verify we can write again
+	buf[0] = 123
+	assert.Equal(t, byte(123), buf[0])
+}
+
+func TestMmapBackend_Protect_MultipleBuffersWithFlags(t *testing.T) {
+	backend := MmapBackend(0, 0)
+	protectedBackend := backend.(ProtectedArenaBackend)
+
+	// Allocate multiple buffers
+	buf1, err := backend.Grow(nil, 4096)
+	require.NoError(t, err)
+	defer backend.(FreeableArenaBackend).Free(buf1)
+
+	buf2, err := backend.Grow(nil, 4096)
+	require.NoError(t, err)
+	defer backend.(FreeableArenaBackend).Free(buf2)
+
+	// Write data to both
+	for i := range buf1 {
+		buf1[i] = 1
+	}
+	for i := range buf2 {
+		buf2[i] = 2
+	}
+
+	// Protect both buffers as read-only
+	err = protectedBackend.Protect(testProtRead)
+	assert.NoError(t, err)
+
+	// Verify both are readable
+	assert.Equal(t, byte(1), buf1[0])
+	assert.Equal(t, byte(2), buf2[0])
+
+	// Change both back to read-write
+	err = protectedBackend.Protect(testProtReadWrite)
+	assert.NoError(t, err)
+
+	// Verify both are writable
+	buf1[100] = 11
+	buf2[100] = 22
+	assert.Equal(t, byte(11), buf1[100])
+	assert.Equal(t, byte(22), buf2[100])
+}
+
+func TestMmapBackend_Protect_NoAccess(t *testing.T) {
+	backend := MmapBackend(0, 0)
+	protectedBackend := backend.(ProtectedArenaBackend)
+
+	// Allocate a buffer
+	buf, err := backend.Grow(nil, 4096)
+	require.NoError(t, err)
+	defer backend.(FreeableArenaBackend).Free(buf)
+
+	// Try to set no access protection
+	err = protectedBackend.Protect(testProtNone)
+	// This should succeed from the system call's perspective
+	// (though accessing the memory would cause a segfault/access violation)
+	assert.NoError(t, err)
+
+	// Set back to read-write so we can clean up without issues
+	err = protectedBackend.Protect(testProtReadWrite)
+	assert.NoError(t, err)
+}

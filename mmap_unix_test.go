@@ -11,6 +11,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Platform-specific memory protection constants for testing
+const (
+	testProtRead      = syscall.PROT_READ
+	testProtWrite     = syscall.PROT_WRITE
+	testProtReadWrite = syscall.PROT_READ | syscall.PROT_WRITE
+	testProtNone      = syscall.PROT_NONE
+)
+
 func TestMmapBackend_ProtectionFlags(t *testing.T) {
 	// Test with different protection flags
 	backend := MmapBackend(syscall.PROT_EXEC, 0)

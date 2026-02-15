@@ -20,3 +20,10 @@ func munmap(buf []byte) error {
 	ptr := uintptr(unsafe.Pointer(unsafe.SliceData(buf)))
 	return windows.VirtualFree(ptr, 0, windows.MEM_RELEASE)
 }
+
+func mprotect(buf []byte, flags int) error {
+	addr := uintptr(unsafe.Pointer(unsafe.SliceData(buf)))
+
+	var oldFlags uint32
+	return windows.VirtualProtect(addr, uintptr(len(buf)), uint32(flags), &oldFlags)
+}
