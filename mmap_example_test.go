@@ -9,7 +9,7 @@ import (
 )
 
 func ExampleMmapBackend() {
-	arena := malloc.NewArena(4096, malloc.Backend(malloc.MmapBackend(0, 0)))
+	arena := malloc.NewArena(4096, malloc.Backend(malloc.MmapBackend()))
 	intSlice, _ := malloc.MallocSlice[int](arena, 200)
 	defer malloc.FreeSlice(arena, intSlice)
 

@@ -16,7 +16,7 @@ import (
 func TestMmapBackend_InitialAllocation(t *testing.T) {
 	assert := assert.New(t)
 
-	backend := MmapBackend(0, 0)
+	backend := MmapBackend()
 	buf, err := backend.Grow(nil, 1024)
 
 	require.NoError(t, err)
@@ -54,7 +54,7 @@ func TestMmapBackend_PageAlignment(t *testing.T) {
 		{"odd size", 1337},
 	}
 
-	backend := MmapBackend(0, 0)
+	backend := MmapBackend()
 	pageSize := syscall.Getpagesize()
 
 	for _, tt := range tests {
@@ -74,12 +74,12 @@ func TestMmapBackend_PageAlignment(t *testing.T) {
 
 func TestMmapBackendGrowth(t *testing.T) {
 	runBackendGrowthTests(t, "MmapBackend", func() ArenaBackend {
-		return MmapBackend(0, 0)
+		return MmapBackend()
 	})
 }
 
 func TestMmapBackend_SizeValidation(t *testing.T) {
-	backend := MmapBackend(0, 0)
+	backend := MmapBackend()
 
 	// Test maximum size boundary
 	_, err := backend.Grow(nil, uintptr(math.MaxInt))
@@ -99,7 +99,7 @@ func TestMmapBackend_StressTest(t *testing.T) {
 
 	assert := assert.New(t)
 	pageSize := syscall.Getpagesize()
-	a := NewArena(uint64(pageSize), Backend(MmapBackend(0, 0)))
+	a := NewArena(uint64(pageSize), Backend(MmapBackend()))
 
 	// Allocate and free many times to test growth stability
 	// Each iteration allocates a full page, forcing growth on the second iteration
@@ -128,14 +128,14 @@ func TestMmapBackend_ProtectedArenaBackend(t *testing.T) {
 	// Verify that mmapBackend implements ProtectedArenaBackend
 	var _ ProtectedArenaBackend = (*mmapBackend)(nil)
 
-	backend := MmapBackend(0, 0)
+	backend := MmapBackend()
 	protectedBackend, ok := backend.(ProtectedArenaBackend)
 	assert.True(t, ok, "MmapBackend should implement ProtectedArenaBackend")
 	assert.NotNil(t, protectedBackend)
 }
 
 func TestMmapBackend_Protect_NoBuffers(t *testing.T) {
-	backend := MmapBackend(0, 0)
+	backend := MmapBackend()
 	protectedBackend := backend.(ProtectedArenaBackend)
 
 	// Protecting when no buffers are allocated should succeed
@@ -144,7 +144,7 @@ func TestMmapBackend_Protect_NoBuffers(t *testing.T) {
 }
 
 func TestMmapBackend_Protect_SingleBuffer(t *testing.T) {
-	backend := MmapBackend(0, 0)
+	backend := MmapBackend()
 	protectedBackend := backend.(ProtectedArenaBackend)
 
 	// Allocate a buffer
@@ -168,7 +168,7 @@ func TestMmapBackend_Protect_SingleBuffer(t *testing.T) {
 }
 
 func TestMmapBackend_Protect_MultipleBuffers(t *testing.T) {
-	backend := MmapBackend(0, 0)
+	backend := MmapBackend()
 	protectedBackend := backend.(ProtectedArenaBackend)
 
 	// Allocate multiple buffers
@@ -212,7 +212,7 @@ func TestMmapBackend_Protect_MultipleBuffers(t *testing.T) {
 }
 
 func TestMmapBackend_Protect_AfterFree(t *testing.T) {
-	backend := MmapBackend(0, 0)
+	backend := MmapBackend()
 	protectedBackend := backend.(ProtectedArenaBackend)
 
 	// Allocate and free a buffer
@@ -228,7 +228,7 @@ func TestMmapBackend_Protect_AfterFree(t *testing.T) {
 }
 
 func TestMmapBackend_Protect_ChangeProtection(t *testing.T) {
-	backend := MmapBackend(0, 0)
+	backend := MmapBackend()
 	protectedBackend := backend.(ProtectedArenaBackend)
 
 	// Allocate a buffer
@@ -260,7 +260,7 @@ func TestMmapBackend_Protect_ChangeProtection(t *testing.T) {
 }
 
 func TestMmapBackend_Protect_MultipleBuffersWithFlags(t *testing.T) {
-	backend := MmapBackend(0, 0)
+	backend := MmapBackend()
 	protectedBackend := backend.(ProtectedArenaBackend)
 
 	// Allocate multiple buffers
@@ -300,7 +300,7 @@ func TestMmapBackend_Protect_MultipleBuffersWithFlags(t *testing.T) {
 }
 
 func TestMmapBackend_Protect_NoAccess(t *testing.T) {
-	backend := MmapBackend(0, 0)
+	backend := MmapBackend()
 	protectedBackend := backend.(ProtectedArenaBackend)
 
 	// Allocate a buffer
@@ -321,7 +321,7 @@ func TestMmapBackend_Protect_NoAccess(t *testing.T) {
 
 func TestMmapBackend_ProtectionFlags(t *testing.T) {
 	// Test with different protection flags
-	backend := MmapBackend(testProtExec, 0)
+	backend := MmapBackend(MmapProt(testProtExec))
 	buf, err := backend.Grow(nil, 4096)
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
 		t.Skipf("Skipping test: %v", err)

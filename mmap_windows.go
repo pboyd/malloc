@@ -8,14 +8,14 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func mmap(size, prot, flags int) ([]byte, error) {
+func mmap(addr uintptr, size, prot, flags int) ([]byte, error) {
 	if prot&windows.PAGE_EXECUTE != 0 {
 		prot = windows.PAGE_EXECUTE_READWRITE | (prot ^ windows.PAGE_EXECUTE)
 	} else {
 		prot = windows.PAGE_READWRITE | prot
 	}
 
-	ptr, err := windows.VirtualAlloc(0, uintptr(size), uint32(windows.MEM_COMMIT|windows.MEM_RESERVE|flags), uint32(prot))
+	ptr, err := windows.VirtualAlloc(addr, uintptr(size), uint32(windows.MEM_COMMIT|windows.MEM_RESERVE|flags), uint32(prot))
 	if err != nil {
 		return nil, err
 	}
