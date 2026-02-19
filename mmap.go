@@ -1,5 +1,3 @@
-// TODO: This should work for other BSD systems too, figure out which ones and update this tag:
-
 //go:build linux || darwin || windows || openbsd || netbsd || freebsd
 
 package malloc
@@ -13,23 +11,64 @@ import (
 	"unsafe"
 )
 
-// MmapBackend returns an ArenaBackend that allocates memory via mmap(2) (or
-// VirtualAlloc on Windows). This is tested on Linux, Darwin and Windows. It is
-// confirmed to compile on some other BSD platforms, but is otherwise untested.
-//
-// prot and flags are OR'd with the required defaults and passed through to
-// underlying system calls. The supported values are platform-specific.
-func MmapBackend(prot int, flags int) ArenaBackend {
-	return &mmapBackend{
-		prot:   prot,
-		flags:  flags,
-		active: map[*byte][]byte{},
+// BackendOpt is an optional parameter for MmapBackend or VirtualBackend.
+type BackendOpt func(*backendConfig)
+
+type backendConfig struct {
+	flags int
+	prot  int
+	addr  uintptr
+}
+
+// MmapFlags specifies additional flags to pass through the underlying system call.
+func MmapFlags(flags int) BackendOpt {
+	return func(cfg *backendConfig) {
+		cfg.flags = flags
 	}
 }
 
+// MmapProt specified additional protection flags to pass through to the
+// underlying system call.
+//
+// On Unix-like systems, this value will be OR'd with PROT_READ and PROT_WRITE.
+//
+// On Windows, PAGE_READWRITE is the default. If PAGE_EXECUTE is specified
+// the passed flag will be PAGE_EXECUTE_READWRITE.
+func MmapProt(prot int) BackendOpt {
+	return func(cfg *backendConfig) {
+		cfg.prot = prot
+	}
+}
+
+// MmapAddr specifies the address to pass through to the underlying system call.
+//
+// If necessary, the address will rounded down to nearest page boundary.
+func MmapAddr(addr uintptr) BackendOpt {
+	addr = addr &^ uintptr(syscall.Getpagesize()-1)
+
+	return func(cfg *backendConfig) {
+		cfg.addr = addr
+	}
+}
+
+// MmapBackend returns an ArenaBackend that allocates memory via mmap(2) (or
+// VirtualAlloc on Windows). This is tested on Linux, Darwin and Windows. It is
+// confirmed to compile for some BSD variants, but is otherwise untested.
+//
+// prot and flags are OR'd with the required defaults and passed through to
+// underlying system calls. The supported values are platform-specific.
+func MmapBackend(opts ...BackendOpt) ArenaBackend {
+	mb := &mmapBackend{
+		active: map[*byte][]byte{},
+	}
+	for _, opt := range opts {
+		opt(&mb.backendConfig)
+	}
+	return mb
+}
+
 type mmapBackend struct {
-	prot  int
-	flags int
+	backendConfig
 
 	activeMu sync.Mutex
 	active   map[*byte][]byte
@@ -66,7 +105,7 @@ func (mb *mmapBackend) Grow(buf []byte, size uintptr) ([]byte, error) {
 		}
 	}
 
-	newBuf, err := mmap(int(size), mb.prot, mb.flags)
+	newBuf, err := mmap(mb.addr, int(size), mb.prot, mb.flags)
 	if err != nil {
 		return nil, err
 	}
