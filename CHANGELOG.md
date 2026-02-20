@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.2.0] - 2026-02-20
+
+### Added
+
+- `VirtBackend` for fixed-capacity virtual memory arenas: reserves a contiguous virtual address range at creation and commits pages on demand. Each `Grow` call extends the committed region in place, keeping the base address constant. When the arena reaches capacity, `Grow` returns `ErrOutOfMemory`. Implements `ProtectedArenaBackend`.
+
+### Changed
+
+- `MmapBackend` now accepts variadic `BackendOpt` options instead of positional `prot` and `flags` integers. Use `MmapProt`, `MmapFlags`, and `MmapAddr` to configure the mapping; `MmapAddr` requests a specific mapping address. **Breaking change.**
+
+### Fixed
+
+- Exec protection flag for `MmapBackend` on Windows.
+
+[1.2.0]: https://github.com/pboyd/malloc/compare/v1.1.0...v1.2.0
+
 ## [1.1.0] - 2026-02-15
 
 ### Added
