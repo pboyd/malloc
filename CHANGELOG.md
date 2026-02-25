@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.1] - 2026-02-24
+
+### Added
+
+- `VirtReservationBackend.Addr()` method to retrieve the base address of the reserved virtual memory region.
+- `VirtReservationBackend.Release()` method to free the entire reservation when the address is not acceptable or the backend is no longer needed.
+
+### Changed
+
+- `VirtBackend()` now returns `*VirtReservationBackend` instead of `ArenaBackend`, exposing `Addr` and `Release` on the concrete type. **Breaking change.**
+
+[1.2.1]: https://github.com/pboyd/malloc/compare/v1.2.0...v1.2.1
+
 ## [1.2.0] - 2026-02-20
 
 ### Added
