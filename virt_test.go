@@ -16,6 +16,7 @@ func TestVirtBackend_InitialAllocation(t *testing.T) {
 
 	backend, err := VirtBackend(128 * 1024)
 	require.NoError(t, err)
+	defer backend.Release()
 
 	buf, err := backend.Grow(nil, 1024)
 	require.NoError(t, err)
@@ -50,6 +51,7 @@ func TestVirtBackend_PageAlignment(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			backend, err := VirtBackend(uintptr(pageSize) * 64)
 			require.NoError(t, err)
+			defer backend.Release()
 
 			buf, err := backend.Grow(nil, tt.size)
 			require.NoError(t, err)
@@ -70,6 +72,7 @@ func TestVirtBackendGrowth(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
+		t.Cleanup(func() { backend.Release() })
 		return backend
 	})
 }
@@ -82,6 +85,7 @@ func TestVirtBackend_OutOfMemory(t *testing.T) {
 	// Reserve exactly 1 page
 	backend, err := VirtBackend(pageSize)
 	require.NoError(t, err)
+	defer backend.Release()
 
 	// First grow should succeed
 	buf, err := backend.Grow(nil, pageSize)
@@ -101,6 +105,7 @@ func TestVirtBackend_CapacityLimit(t *testing.T) {
 
 	backend, err := VirtBackend(capacity)
 	require.NoError(t, err)
+	defer backend.Release()
 
 	// Grow to capacity
 	buf, err := backend.Grow(nil, capacity)
@@ -119,6 +124,7 @@ func TestVirtBackend_MultipleGrows(t *testing.T) {
 
 	backend, err := VirtBackend(pageSize * 8)
 	require.NoError(t, err)
+	defer backend.Release()
 
 	// First grow
 	buf, err := backend.Grow(nil, pageSize)
@@ -157,6 +163,7 @@ func TestVirtBackend_SameBaseAddress(t *testing.T) {
 
 	backend, err := VirtBackend(pageSize * 4)
 	require.NoError(t, err)
+	defer backend.Release()
 
 	buf1, err := backend.Grow(nil, pageSize)
 	require.NoError(t, err)
@@ -173,25 +180,13 @@ func TestVirtBackend_SameBaseAddress(t *testing.T) {
 	assert.Greater(t, len(buf2), len(buf1))
 }
 
-func TestVirtBackend_ProtectedArenaBackend(t *testing.T) {
-	// Verify that virtBackend implements ProtectedArenaBackend at compile time.
-	var _ ProtectedArenaBackend = (*virtBackend)(nil)
-
-	backend, err := VirtBackend(128 * 1024)
-	require.NoError(t, err)
-
-	protectedBackend, ok := backend.(ProtectedArenaBackend)
-	assert.True(t, ok, "VirtBackend should implement ProtectedArenaBackend")
-	assert.NotNil(t, protectedBackend)
-}
-
 func TestVirtBackend_Protect_NoCommit(t *testing.T) {
 	// Protect before any memory is committed should succeed (no-op).
 	backend, err := VirtBackend(128 * 1024)
 	require.NoError(t, err)
+	defer backend.Release()
 
-	protectedBackend := backend.(ProtectedArenaBackend)
-	err = protectedBackend.Protect(testProtReadWrite)
+	err = backend.Protect(testProtReadWrite)
 	assert.NoError(t, err, "Protect should succeed with no committed memory")
 }
 
@@ -201,6 +196,7 @@ func TestVirtBackend_Protect_SingleRegion(t *testing.T) {
 	pageSize := uintptr(syscall.Getpagesize())
 	backend, err := VirtBackend(pageSize * 4)
 	require.NoError(t, err)
+	defer backend.Release()
 
 	buf, err := backend.Grow(nil, pageSize)
 	require.NoError(t, err)
@@ -211,8 +207,7 @@ func TestVirtBackend_Protect_SingleRegion(t *testing.T) {
 	}
 
 	// Protect (keeping read-write to avoid segfault in test)
-	protectedBackend := backend.(ProtectedArenaBackend)
-	err = protectedBackend.Protect(testProtReadWrite)
+	err = backend.Protect(testProtReadWrite)
 	assert.NoError(err, "Protect should succeed on committed region")
 
 	// Data should still be readable and writable
@@ -229,6 +224,7 @@ func TestVirtBackend_Protect_ChangeProtection(t *testing.T) {
 	pageSize := uintptr(syscall.Getpagesize())
 	backend, err := VirtBackend(pageSize * 4)
 	require.NoError(t, err)
+	defer backend.Release()
 
 	buf, err := backend.Grow(nil, pageSize)
 	require.NoError(t, err)
@@ -238,10 +234,8 @@ func TestVirtBackend_Protect_ChangeProtection(t *testing.T) {
 		buf[i] = byte(i % 256)
 	}
 
-	protectedBackend := backend.(ProtectedArenaBackend)
-
 	// Change to read-only
-	err = protectedBackend.Protect(testProtRead)
+	err = backend.Protect(testProtRead)
 	assert.NoError(err, "Protect should succeed when changing to read-only")
 
 	// Data should still be readable
@@ -250,7 +244,7 @@ func TestVirtBackend_Protect_ChangeProtection(t *testing.T) {
 	}
 
 	// Change back to read-write
-	err = protectedBackend.Protect(testProtReadWrite)
+	err = backend.Protect(testProtReadWrite)
 	assert.NoError(err, "Protect should succeed when changing to read-write")
 
 	// Should be writable again
@@ -265,6 +259,7 @@ func TestVirtBackend_Protect_CoversFullCommit(t *testing.T) {
 	pageSize := uintptr(syscall.Getpagesize())
 	backend, err := VirtBackend(pageSize * 8)
 	require.NoError(t, err)
+	defer backend.Release()
 
 	buf, err := backend.Grow(nil, pageSize)
 	require.NoError(t, err)
@@ -281,10 +276,8 @@ func TestVirtBackend_Protect_CoversFullCommit(t *testing.T) {
 		secondPage[i] = 0x22
 	}
 
-	protectedBackend := backend.(ProtectedArenaBackend)
-
 	// Change the entire committed region to read-only
-	err = protectedBackend.Protect(testProtRead)
+	err = backend.Protect(testProtRead)
 	assert.NoError(err)
 
 	// Both pages should be readable
@@ -292,7 +285,7 @@ func TestVirtBackend_Protect_CoversFullCommit(t *testing.T) {
 	assert.Equal(byte(0x22), buf2[pageSize], "second page should be readable")
 
 	// Change back to read-write
-	err = protectedBackend.Protect(testProtReadWrite)
+	err = backend.Protect(testProtReadWrite)
 	assert.NoError(err)
 
 	// Both pages should be writable again
@@ -306,19 +299,18 @@ func TestVirtBackend_Protect_NoAccess(t *testing.T) {
 	pageSize := uintptr(syscall.Getpagesize())
 	backend, err := VirtBackend(pageSize * 2)
 	require.NoError(t, err)
+	defer backend.Release()
 
 	buf, err := backend.Grow(nil, pageSize)
 	require.NoError(t, err)
 
-	protectedBackend := backend.(ProtectedArenaBackend)
-
 	// Set no-access protection (accessing the memory would cause a segfault,
 	// but the syscall itself should succeed)
-	err = protectedBackend.Protect(testProtNone)
+	err = backend.Protect(testProtNone)
 	assert.NoError(t, err)
 
 	// Restore to read-write so cleanup doesn't crash
-	err = protectedBackend.Protect(testProtReadWrite)
+	err = backend.Protect(testProtReadWrite)
 	assert.NoError(t, err)
 
 	buf[0] = 0x01
@@ -330,6 +322,7 @@ func TestVirtBackend_Protect_ProtFlagsPassedToCommit(t *testing.T) {
 	pageSize := uintptr(syscall.Getpagesize())
 	backend, err := VirtBackend(pageSize*2, MmapProt(testProtReadWrite))
 	require.NoError(t, err)
+	defer backend.Release()
 
 	buf, err := backend.Grow(nil, pageSize)
 	require.NoError(t, err)
@@ -351,6 +344,7 @@ func TestVirtBackend_StressTest(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() { backend.Release() })
 		return backend
 	}()))
 

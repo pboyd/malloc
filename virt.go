@@ -9,7 +9,7 @@ import (
 
 // VirtBackend reserves a portion of virtual memory upfront and commits pages
 // as needed. Only grows up to the size of its original reservation.
-func VirtBackend(size uintptr, opts ...BackendOpt) (ArenaBackend, error) {
+func VirtBackend(size uintptr, opts ...BackendOpt) (*VirtReservationBackend, error) {
 	var cfg backendConfig
 	for _, opt := range opts {
 		opt(&cfg)
@@ -23,14 +23,14 @@ func VirtBackend(size uintptr, opts ...BackendOpt) (ArenaBackend, error) {
 		return nil, err
 	}
 
-	return &virtBackend{
+	return &VirtReservationBackend{
 		backendConfig: cfg,
 		baseAddr:      uintptr(ptr),
 		capacity:      size,
 	}, nil
 }
 
-type virtBackend struct {
+type VirtReservationBackend struct {
 	backendConfig
 
 	baseAddr  uintptr
@@ -38,7 +38,7 @@ type virtBackend struct {
 	capacity  uintptr
 }
 
-func (vb *virtBackend) Grow(_ []byte, size uintptr) ([]byte, error) {
+func (vb *VirtReservationBackend) Grow(_ []byte, size uintptr) ([]byte, error) {
 	pageSize := uintptr(syscall.Getpagesize())
 	size = (size + pageSize - 1) &^ (pageSize - 1)
 
@@ -56,10 +56,34 @@ func (vb *virtBackend) Grow(_ []byte, size uintptr) ([]byte, error) {
 	return unsafe.Slice((*byte)(unsafe.Pointer(vb.baseAddr)), int(vb.committed)), nil
 }
 
-func (vb *virtBackend) Protect(prot int) error {
+var _ ProtectedArenaBackend = (*VirtReservationBackend)(nil)
+
+func (vb *VirtReservationBackend) Protect(prot int) error {
 	if vb.committed == 0 {
 		return nil
 	}
 	buf := unsafe.Slice((*byte)(unsafe.Pointer(vb.baseAddr)), int(vb.committed))
 	return mprotect(buf, prot)
+}
+
+// Release frees the reserved memory. Callers should not use the backend after
+// calling Release.
+func (vb *VirtReservationBackend) Release() error {
+	if vb == nil || vb.baseAddr == 0 {
+		return nil
+	}
+
+	err := virtFree(vb.baseAddr, vb.capacity)
+	if err != nil {
+		return err
+	}
+
+	vb.baseAddr = 0
+
+	return nil
+}
+
+// Addr returns the base address of the reserved memory.
+func (vb *VirtReservationBackend) Addr() uintptr {
+	return vb.baseAddr
 }
